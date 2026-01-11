@@ -1,9 +1,53 @@
-venv/
+# Python
 __pycache__/
-*.pyc
-dist/
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
-*.spec
-config.json
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Application specific
+config.json
+shift_automator.log
+*.log
+
+# PyInstaller
+*.spec
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db

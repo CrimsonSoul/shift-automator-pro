@@ -1,39 +1,31 @@
 @echo off
-setlocal
-echo Checking for Python...
+echo Setting up Shift Automator...
 
-:: Try 'py' launcher first (standard on Windows)
-py --version >nul 2>&1
-if %errorlevel% == 0 (
-    set PY_CMD=py
-    goto :found
-)
-
-:: Try 'python' command
+REM Check if Python is installed
 python --version >nul 2>&1
-if %errorlevel% == 0 (
-    set PY_CMD=python
-    goto :found
-)
-
-echo [!] ERROR: Python was not found. 
-echo Please download and install Python from: https://www.python.org/downloads/
-echo *** IMPORTANT: Check the "Add Python to PATH" box during installation! ***
-pause
-exit /b
-
-:found
-echo Using %PY_CMD% to set up environment...
-%PY_CMD% -m venv venv
-if %errorlevel% neq 0 (
-    echo [!] Failed to create virtual environment.
+if errorlevel 1 (
+    echo Error: Python is not installed or not in PATH
+    echo Please install Python 3.10 or higher from https://www.python.org/
     pause
-    exit /b
+    exit /b 1
 )
 
-call venv\Scripts\activate
-python -m pip install --upgrade pip
+REM Create virtual environment if it doesn't exist
+if not exist ".venv" (
+    echo Creating virtual environment...
+    python -m venv .venv
+)
+
+REM Activate virtual environment
+echo Activating virtual environment...
+call .venv\Scripts\activate.bat
+
+REM Install dependencies
+echo Installing dependencies...
 pip install -r requirements.txt
+
 echo.
-echo Setup complete. Run "start_app.bat" to launch.
+echo Setup complete!
+echo.
+echo To run the application, use start_app.bat
 pause
