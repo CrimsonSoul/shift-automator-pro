@@ -45,6 +45,9 @@ class ShiftAutomatorApp:
         # Set up button command
         self.ui.set_start_command(self.start_processing)
 
+        # Set up config change callback to save configuration on changes
+        self.ui.set_config_change_callback(self._save_current_config)
+
         logger.info("Shift Automator application initialized")
 
     def _load_config(self) -> None:
@@ -77,6 +80,15 @@ class ShiftAutomatorApp:
             logger.info("Configuration saved successfully")
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
+
+    def _save_current_config(self) -> None:
+        """Save the current configuration from UI to file."""
+        config = AppConfig(
+            day_folder=self.ui.get_day_folder(),
+            night_folder=self.ui.get_night_folder(),
+            printer_name=self.ui.get_printer_name()
+        )
+        self._save_config(config)
 
     def _validate_inputs(self) -> tuple[bool, Optional[str]]:
         """

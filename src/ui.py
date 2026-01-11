@@ -54,6 +54,9 @@ class ScheduleAppUI:
         self.progress: Optional[ttk.Progressbar] = None
         self.print_btn: Optional[tk.Button] = None
 
+        # Callback for configuration changes
+        self._on_config_change: Optional[Callable[[], None]] = None
+
         # Create widgets
         self._create_widgets()
 
@@ -176,6 +179,8 @@ class ScheduleAppUI:
             all_printers = []
 
         self.printer_var = tk.StringVar(value="")
+        # Add trace to save config when printer selection changes
+        self.printer_var.trace_add("write", lambda *args: self._on_printer_change())
         self.printer_dropdown = ttk.OptionMenu(
             output_row, self.printer_var, "Choose Printer", *all_printers
         )
@@ -246,6 +251,15 @@ class ScheduleAppUI:
             entry.delete(0, tk.END)
             entry.insert(0, path)
             logger.debug(f"Selected folder: {path}")
+            # Trigger config change callback if set
+            if self._on_config_change:
+                self._on_config_change()
+
+    def _on_printer_change(self) -> None:
+        """Handle printer selection change."""
+        # Trigger config change callback if set
+        if self._on_config_change:
+            self._on_config_change()
 
     def get_day_folder(self) -> str:
         """Get the day folder path."""
@@ -276,6 +290,15 @@ class ScheduleAppUI:
         """
         if self.print_btn:
             self.print_btn.config(command=command)
+
+    def set_config_change_callback(self, callback: Callable[[], None]) -> None:
+        """
+        Set a callback to be called when configuration changes.
+
+        Args:
+            callback: Function to call when configuration changes
+        """
+        self._on_config_change = callback
 
     def set_print_button_state(self, state: str) -> None:
         """

@@ -16,6 +16,31 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
+def _get_default_config_dir() -> Path:
+    """
+    Get the default config directory based on the operating system.
+
+    Returns:
+        Path to the default config directory
+    """
+    if os.name == 'nt':  # Windows
+        # Use %LOCALAPPDATA% for Windows
+        appdata = os.environ.get('LOCALAPPDATA')
+        if appdata:
+            return Path(appdata) / 'ShiftAutomator'
+        # Fallback to user profile
+        user_profile = os.environ.get('USERPROFILE')
+        if user_profile:
+            return Path(user_profile) / '.shift_automator'
+    else:  # macOS/Linux
+        # Use ~/.local/share for Linux/macOS
+        home = Path.home()
+        return home / '.local' / 'share' / 'shift_automator'
+    
+    # Final fallback to current directory
+    return Path('.')
+
+
 @dataclass
 class AppConfig:
     """Application configuration data class."""
@@ -58,9 +83,14 @@ class ConfigManager:
         Initialize ConfigManager.
 
         Args:
-            config_path: Path to config file (default: CONFIG_FILENAME in current directory)
+            config_path: Path to config file (default: CONFIG_FILENAME in AppData directory)
         """
-        self.config_path = Path(config_path) if config_path else Path(CONFIG_FILENAME)
+        if config_path:
+            self.config_path = Path(config_path)
+        else:
+            config_dir = _get_default_config_dir()
+            config_dir.mkdir(parents=True, exist_ok=True)
+            self.config_path = config_dir / CONFIG_FILENAME
         self._config: Optional[AppConfig] = None
 
     def load(self) -> AppConfig:

@@ -12,6 +12,31 @@ from typing import Optional
 from .constants import LOG_FILENAME
 
 
+def _get_default_log_dir() -> Path:
+    """
+    Get the default log directory based on the operating system.
+
+    Returns:
+        Path to the default log directory
+    """
+    if os.name == 'nt':  # Windows
+        # Use %LOCALAPPDATA% for Windows
+        appdata = os.environ.get('LOCALAPPDATA')
+        if appdata:
+            return Path(appdata) / 'ShiftAutomator'
+        # Fallback to user profile
+        user_profile = os.environ.get('USERPROFILE')
+        if user_profile:
+            return Path(user_profile) / '.shift_automator'
+    else:  # macOS/Linux
+        # Use ~/.local/share for Linux/macOS
+        home = Path.home()
+        return home / '.local' / 'share' / 'shift_automator'
+    
+    # Final fallback to current directory
+    return Path('.')
+
+
 def setup_logging(
     log_level: int = logging.INFO,
     log_dir: Optional[str] = None,
@@ -22,7 +47,7 @@ def setup_logging(
 
     Args:
         log_level: The logging level (default: logging.INFO)
-        log_dir: Directory for log files (default: current working directory)
+        log_dir: Directory for log files (default: AppData directory)
         log_filename: Name of the log file
 
     Returns:
@@ -31,10 +56,11 @@ def setup_logging(
     # Determine log file path
     if log_dir:
         log_path = Path(log_dir)
-        log_path.mkdir(parents=True, exist_ok=True)
-        log_file = log_path / log_filename
     else:
-        log_file = Path(log_filename)
+        log_path = _get_default_log_dir()
+    
+    log_path.mkdir(parents=True, exist_ok=True)
+    log_file = log_path / log_filename
 
     # Create logger
     logger = logging.getLogger("shift_automator")
