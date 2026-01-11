@@ -70,7 +70,7 @@ def get_shift_template_name(dt: date, shift_type: str = "day") -> str:
         # Day shift uses "THIRD Thursday" for third Thursdays
         if is_third_thursday(dt):
             template_name = "THIRD Thursday"
-            logger.debug(f"Day shift for {dt}: {template_name}")
+            logger.info(f"Day shift for {dt}: {template_name} (special schedule)")
         else:
             template_name = day_name
             logger.debug(f"Day shift for {dt}: {template_name}")

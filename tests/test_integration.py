@@ -5,6 +5,7 @@ These tests verify the end-to-end functionality of the main application workflow
 """
 
 import os
+import sys
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -15,7 +16,14 @@ import tkinter as tk
 from src.main import ShiftAutomatorApp
 from src.config import AppConfig
 
+# Skip integration tests on macOS/Linux since they require Tkinter display
+needs_display = pytest.mark.skipif(
+    sys.platform == "darwin" or sys.platform.startswith("linux"),
+    reason="Integration tests require display server (skipped on macOS/Linux in CI)"
+)
 
+
+@needs_display
 class TestShiftAutomatorAppIntegration:
     """Integration tests for ShiftAutomatorApp."""
 
@@ -47,7 +55,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_app_initialization(self, mock_root, temp_folders):
         """Test that the application initializes properly."""
-        with patch('src.main.ScheduleAppUI'):
+        with patch('src.ui.ScheduleAppUI'):
             app = ShiftAutomatorApp(mock_root)
 
             assert app.root == mock_root
@@ -59,7 +67,7 @@ class TestShiftAutomatorAppIntegration:
         """Test that configuration is saved and loaded correctly."""
         config_file = tmp_path / "test_config.json"
 
-        with patch('src.main.ScheduleAppUI'), \
+        with patch('src.ui.ScheduleAppUI'), \
              patch('src.config.ConfigManager.config_path', config_file):
 
             app = ShiftAutomatorApp(mock_root)
@@ -83,7 +91,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_input_validation(self, mock_root, temp_folders):
         """Test that input validation works correctly."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -100,7 +108,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_input_validation_missing_folders(self, mock_root):
         """Test validation fails when folders are missing."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = ""
             mock_ui.get_night_folder.return_value = ""
@@ -114,7 +122,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_input_validation_invalid_date_range(self, mock_root, temp_folders):
         """Test validation fails when end date is before start date."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -130,8 +138,8 @@ class TestShiftAutomatorAppIntegration:
 
     def test_batch_processing_cancellation(self, mock_root, temp_folders):
         """Test that batch processing can be cancelled."""
-        with patch('src.main.ScheduleAppUI') as MockUI, \
-             patch('src.main.WordProcessor') as MockWordProc:
+        with patch('src.ui.ScheduleAppUI') as MockUI, \
+             patch('src.word_processor.WordProcessor') as MockWordProc:
 
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
@@ -157,7 +165,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_start_processing_updates_ui_state(self, mock_root, temp_folders):
         """Test that starting processing updates UI button states."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -173,10 +181,10 @@ class TestShiftAutomatorAppIntegration:
             mock_ui.set_cancel_button_state.assert_called_with("normal")
             assert app._cancel_requested is False
 
-    @patch('src.main.WordProcessor')
+    @patch('src.word_processor.WordProcessor')
     def test_batch_processing_single_day(self, MockWordProc, mock_root, temp_folders):
         """Test processing a single day."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -201,10 +209,10 @@ class TestShiftAutomatorAppIntegration:
             assert calls[0][0][1] == "Monday"  # Day shift
             assert calls[1][0][1] == "Monday Night"  # Night shift
 
-    @patch('src.main.WordProcessor')
+    @patch('src.word_processor.WordProcessor')
     def test_batch_processing_third_thursday(self, MockWordProc, mock_root, temp_folders):
         """Test processing third Thursday uses special template."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -224,10 +232,10 @@ class TestShiftAutomatorAppIntegration:
             assert calls[0][0][1] == "THIRD Thursday"  # Day shift special template
             assert calls[1][0][1] == "Thursday Night"  # Night shift regular
 
-    @patch('src.main.WordProcessor')
+    @patch('src.word_processor.WordProcessor')
     def test_batch_processing_failure_tracking(self, MockWordProc, mock_root, temp_folders):
         """Test that failures are tracked and reported."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -248,7 +256,7 @@ class TestShiftAutomatorAppIntegration:
 
     def test_config_change_callback(self, mock_root, temp_folders):
         """Test that configuration changes are saved via callback."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]
@@ -264,10 +272,10 @@ class TestShiftAutomatorAppIntegration:
             assert config.day_folder == temp_folders["day"]
             assert config.night_folder == temp_folders["night"]
 
-    @patch('src.main.WordProcessor')
+    @patch('src.word_processor.WordProcessor')
     def test_batch_processing_multiple_days(self, MockWordProc, mock_root, temp_folders):
         """Test processing multiple days in sequence."""
-        with patch('src.main.ScheduleAppUI') as MockUI:
+        with patch('src.ui.ScheduleAppUI') as MockUI:
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = temp_folders["day"]
             mock_ui.get_night_folder.return_value = temp_folders["night"]

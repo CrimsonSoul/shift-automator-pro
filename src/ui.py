@@ -4,12 +4,20 @@ UI components for Shift Automator application.
 This module contains all Tkinter UI components and styling.
 """
 
+import os
+import sys
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 from tkcalendar import DateEntry
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Any
 
-import win32print
+# Platform-specific imports
+try:
+    import win32print
+    HAS_WIN32PRINT = True
+except ImportError:
+    HAS_WIN32PRINT = False
+    win32print = None  # type: ignore
 
 from .constants import (
     COLORS, FONTS,
@@ -20,6 +28,11 @@ from .constants import (
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+# Type aliases for callbacks
+CommandCallback = Callable[[], None]
+ConfigChangeCallback = Callable[[], None]
+StatusUpdateCallback = Callable[[str, Optional[float]], None]
 
 
 class ScheduleAppUI:
@@ -56,7 +69,7 @@ class ScheduleAppUI:
         self.cancel_btn: Optional[tk.Button] = None
 
         # Callback for configuration changes
-        self._on_config_change: Optional[Callable[[], None]] = None
+        self._on_config_change: Optional[ConfigChangeCallback] = None
 
         # Create widgets
         self._create_widgets()
@@ -169,10 +182,25 @@ class ScheduleAppUI:
         output_row.pack(fill="x")
         ttk.Label(output_row, text="TARGET PRINTER", style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
 
+        # Check platform compatibility
+        if not HAS_WIN32PRINT:
+            logger.error("win32print not available - application requires Windows")
+            ttk.Label(
+                output_row,
+                text="Error: This application requires Windows to access printers.",
+                foreground="red"
+            ).pack(fill="x", pady=4)
+            self.printer_var = tk.StringVar(value="")
+            self.printer_dropdown = ttk.OptionMenu(
+                output_row, self.printer_var, "Not Available", "Not Available"
+            )
+            self.printer_dropdown.pack(fill="x")
+            return
+
         # Get available printers
         try:
-            local_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_LOCAL)]
-            network_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_NETWORK)]
+            local_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_LOCAL)]  # type: ignore
+            network_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_NETWORK)]  # type: ignore
             all_printers = sorted(list(set(local_printers + network_printers)))
             logger.debug(f"Found {len(all_printers)} printers")
         except Exception as e:
@@ -287,15 +315,25 @@ class ScheduleAppUI:
         """Get the selected printer name."""
         return self.printer_var.get() if self.printer_var else ""
 
-    def get_start_date(self):
-        """Get the start date."""
+    def get_start_date(self) -> Optional[Any]:
+        """
+        Get the start date.
+
+        Returns:
+            The start date from the date picker, or None if not available
+        """
         return self.start_date_picker.get_date() if self.start_date_picker else None
 
-    def get_end_date(self):
-        """Get the end date."""
+    def get_end_date(self) -> Optional[Any]:
+        """
+        Get the end date.
+
+        Returns:
+            The end date from the date picker, or None if not available
+        """
         return self.end_date_picker.get_date() if self.end_date_picker else None
 
-    def set_start_command(self, command: Callable[[], None]) -> None:
+    def set_start_command(self, command: CommandCallback) -> None:
         """
         Set the command for the print button.
 
@@ -305,7 +343,7 @@ class ScheduleAppUI:
         if self.print_btn:
             self.print_btn.config(command=command)
 
-    def set_cancel_command(self, command: Callable[[], None]) -> None:
+    def set_cancel_command(self, command: CommandCallback) -> None:
         """
         Set the command for the cancel button.
 
@@ -315,7 +353,7 @@ class ScheduleAppUI:
         if self.cancel_btn:
             self.cancel_btn.config(command=command)
 
-    def set_config_change_callback(self, callback: Callable[[], None]) -> None:
+    def set_config_change_callback(self, callback: ConfigChangeCallback) -> None:
         """
         Set a callback to be called when configuration changes.
 

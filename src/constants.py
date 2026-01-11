@@ -50,6 +50,25 @@ PROGRESS_MAX: Final = 100
 # Retry settings for COM calls
 COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
+COM_TIMEOUT: Final = 30  # seconds - timeout for COM operations
+
+# Retry settings for print operations
+PRINT_MAX_RETRIES: Final = 3
+PRINT_INITIAL_DELAY: Final = 2.0  # seconds
+PRINT_MAX_DELAY: Final = 10.0  # seconds
+
+# Transient error keywords for retry
+TRANSIENT_ERROR_KEYWORDS: Final = (
+    "offline",
+    "not ready",
+    "busy",
+    "timeout",
+    "temporarily",
+    "unavailable"
+)
+
+# Configuration save debouncing
+CONFIG_DEBOUNCE_DELAY: Final = 1.0  # seconds - delay before saving config
 
 
 @dataclass(frozen=True)

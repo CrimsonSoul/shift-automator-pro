@@ -5,13 +5,21 @@ A high-performance desktop application for automating shift schedule printing.
 """
 
 import threading
+import time
 from datetime import date, timedelta
 from typing import Optional
 
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
-from .constants import PROGRESS_MAX
+from .constants import (
+    PROGRESS_MAX,
+    PRINT_MAX_RETRIES,
+    PRINT_INITIAL_DELAY,
+    PRINT_MAX_DELAY,
+    TRANSIENT_ERROR_KEYWORDS,
+    CONFIG_DEBOUNCE_DELAY
+)
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
 from .scheduler import get_shift_template_name, validate_date_range
@@ -21,6 +29,36 @@ from .word_processor import WordProcessor
 # Set up logging
 setup_logging()
 logger = get_logger(__name__)
+
+
+def _is_transient_error(error_message: str) -> bool:
+    """
+    Check if an error message indicates a transient failure that can be retried.
+
+    Args:
+        error_message: The error message to check
+
+    Returns:
+        True if the error appears to be transient, False otherwise
+    """
+    error_lower = error_message.lower()
+    return any(keyword in error_lower for keyword in TRANSIENT_ERROR_KEYWORDS)
+
+
+def _calculate_retry_delay(attempt: int, initial_delay: float, max_delay: float) -> float:
+    """
+    Calculate retry delay with exponential backoff.
+
+    Args:
+        attempt: The attempt number (0-indexed)
+        initial_delay: Initial delay in seconds
+        max_delay: Maximum delay in seconds
+
+    Returns:
+        Delay in seconds for this attempt
+    """
+    delay = initial_delay * (2 ** attempt)
+    return min(delay, max_delay)
 
 
 class ShiftAutomatorApp:
@@ -40,6 +78,10 @@ class ShiftAutomatorApp:
         self._processing_thread: Optional[threading.Thread] = None
         self._cancel_requested = False
 
+        # Config debouncing
+        self._config_save_pending = False
+        self._config_save_timer: Optional[threading.Timer] = None
+
         # Load and apply saved configuration
         self._load_config()
 
@@ -48,7 +90,7 @@ class ShiftAutomatorApp:
         self.ui.set_cancel_command(self.cancel_processing)
 
         # Set up config change callback to save configuration on changes
-        self.ui.set_config_change_callback(self._save_current_config)
+        self.ui.set_config_change_callback(self._schedule_config_save)
 
         logger.info("Shift Automator application initialized")
 
@@ -82,6 +124,29 @@ class ShiftAutomatorApp:
             logger.info("Configuration saved successfully")
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
+
+    def _schedule_config_save(self) -> None:
+        """Schedule a debounced configuration save."""
+        # Cancel any pending save timer
+        if self._config_save_timer is not None:
+            self._config_save_timer.cancel()
+
+        # Set flag that save is pending
+        self._config_save_pending = True
+
+        # Schedule new save
+        self._config_save_timer = threading.Timer(
+            CONFIG_DEBOUNCE_DELAY,
+            self._save_config_if_pending
+        )
+        self._config_save_timer.start()
+
+    def _save_config_if_pending(self) -> None:
+        """Save configuration if a save is pending (called by timer)."""
+        if self._config_save_pending:
+            self._save_current_config()
+            self._config_save_pending = False
+            self._config_save_timer = None
 
     def _save_current_config(self) -> None:
         """Save the current configuration from UI to file."""
@@ -163,6 +228,55 @@ class ShiftAutomatorApp:
             self.ui.set_cancel_button_state("disabled")
             logger.info("User requested cancellation of batch processing")
 
+    def _print_with_retry(self, word_proc: WordProcessor, folder: str, template: str,
+                          current_date: date, printer_name: str) -> tuple[bool, Optional[str]]:
+        """
+        Print a document with retry logic for transient failures.
+
+        Args:
+            word_proc: The WordProcessor instance
+            folder: Template folder path
+            template: Template name
+            current_date: Date for the document
+            printer_name: Target printer name
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        last_error = None
+
+        for attempt in range(PRINT_MAX_RETRIES):
+            # Check for cancellation before retry
+            if self._cancel_requested:
+                logger.info(f"Print cancelled during retry attempt {attempt + 1}")
+                return False, "Cancelled by user"
+
+            # Attempt to print
+            success, error = word_proc.print_document(
+                folder, template, current_date, printer_name
+            )
+
+            if success:
+                if attempt > 0:
+                    logger.info(f"Successfully printed {template} after {attempt} retries")
+                return True, None
+
+            last_error = error
+
+            # Check if error is transient and we should retry
+            if attempt < PRINT_MAX_RETRIES - 1 and _is_transient_error(error or ""):
+                delay = _calculate_retry_delay(attempt, PRINT_INITIAL_DELAY, PRINT_MAX_DELAY)
+                logger.warning(
+                    f"Transient error printing {template} (attempt {attempt + 1}/{PRINT_MAX_RETRIES}): "
+                    f"{error}. Retrying in {delay:.1f} seconds..."
+                )
+                time.sleep(delay)
+            else:
+                # Not a transient error or no more retries
+                break
+
+        return False, last_error
+
     def _process_batch(self) -> None:
         """Process the batch of schedules."""
         start_date = self.ui.get_start_date()
@@ -170,6 +284,12 @@ class ShiftAutomatorApp:
         day_folder = self.ui.get_day_folder()
         night_folder = self.ui.get_night_folder()
         printer_name = self.ui.get_printer_name()
+
+        # Cancel any pending config save and save immediately before processing
+        if self._config_save_timer is not None:
+            self._config_save_timer.cancel()
+            self._config_save_timer = None
+        self._config_save_pending = False
 
         # Save configuration
         config = AppConfig(
@@ -207,8 +327,8 @@ class ShiftAutomatorApp:
 
                     # Process Day Shift
                     day_template = get_shift_template_name(current_date, "day")
-                    success, error = word_proc.print_document(
-                        day_folder, day_template, current_date, printer_name
+                    success, error = self._print_with_retry(
+                        word_proc, day_folder, day_template, current_date, printer_name
                     )
                     if not success:
                         failed_operations.append({
@@ -227,8 +347,8 @@ class ShiftAutomatorApp:
 
                     # Process Night Shift
                     night_template = get_shift_template_name(current_date, "night")
-                    success, error = word_proc.print_document(
-                        night_folder, night_template, current_date, printer_name
+                    success, error = self._print_with_retry(
+                        word_proc, night_folder, night_template, current_date, printer_name
                     )
                     if not success:
                         failed_operations.append({
@@ -306,8 +426,9 @@ def main() -> None:
         try:
             import tkinter.messagebox as mb
             mb.showerror("Fatal Error", f"The application encountered a fatal error:\n\n{str(e)}")
-        except:
+        except Exception as messagebox_error:
             print(f"Fatal error: {e}")
+            print(f"Error showing message box: {messagebox_error}")
     finally:
         logger.info("Shift Automator shutting down")
 

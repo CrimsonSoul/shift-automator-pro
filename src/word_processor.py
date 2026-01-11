@@ -6,25 +6,40 @@ including document opening, date replacement, and printing.
 """
 
 import os
+import sys
+import threading
 import time
 from datetime import date
 from pathlib import Path
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Callable
 
-import pythoncom
-import win32com.client
+# Platform-specific imports
+try:
+    import pythoncom
+    import win32com.client
+    HAS_PYWIN32 = True
+except ImportError:
+    HAS_PYWIN32 = False
+    pythoncom = None  # type: ignore
+    win32com = None  # type: ignore
 
 from .constants import (
     DOCX_EXTENSION,
     PROTECTION_NONE,
     CLOSE_NO_SAVE,
     COM_RETRIES,
-    COM_RETRY_DELAY
+    COM_RETRY_DELAY,
+    COM_TIMEOUT
 )
 from .logger import get_logger
 from .path_validation import validate_folder_path, is_path_within_base
 
 logger = get_logger(__name__)
+
+
+class TimeoutError(Exception):
+    """Exception raised when COM operation times out."""
+    pass
 
 
 class WordProcessor:
@@ -34,20 +49,27 @@ class WordProcessor:
         """Initialize WordProcessor."""
         self.word_app: Optional[Any] = None
         self._initialized = False
+        self._com_lock = threading.Lock()
 
     def initialize(self) -> None:
         """
         Initialize the Word application instance.
 
         Raises:
-            RuntimeError: If Word cannot be initialized
+            RuntimeError: If Word cannot be initialized or platform is incompatible
         """
         if self._initialized:
             return
 
+        if not HAS_PYWIN32:
+            raise RuntimeError(
+                "This application requires Windows with pywin32 installed. "
+                "Current platform: " + sys.platform
+            )
+
         try:
-            pythoncom.CoInitialize()
-            self.word_app = win32com.client.Dispatch("Word.Application")
+            pythoncom.CoInitialize()  # type: ignore
+            self.word_app = win32com.client.Dispatch("Word.Application")  # type: ignore
             self.word_app.Visible = False
             self.word_app.DisplayAlerts = 0
             self._initialized = True
@@ -69,27 +91,53 @@ class WordProcessor:
                 self._initialized = False
                 pythoncom.CoUninitialize()
 
-    def safe_com_call(self, func: callable, *args: Any, retries: int = COM_RETRIES,
-                      delay: float = COM_RETRY_DELAY) -> Any:
+    def safe_com_call(self, func: Callable[..., Any], *args: Any,
+                      retries: int = COM_RETRIES, delay: float = COM_RETRY_DELAY,
+                      timeout: float = COM_TIMEOUT, **kwargs: Any) -> Any:
         """
-        Execute a COM call with retry logic for transient errors.
+        Execute a COM call with retry logic for transient errors and timeout protection.
 
         Args:
             func: The COM function to call
             *args: Arguments to pass to the function
+            **kwargs: Keyword arguments to pass to the function
             retries: Number of retry attempts
             delay: Delay between retries in seconds
+            timeout: Maximum time to wait for operation to complete in seconds
 
         Returns:
             The result of the function call
 
         Raises:
+            TimeoutError: If operation times out
             Exception: If all retry attempts fail
         """
-        for attempt in range(retries):
+        result = [None]
+        error = [None]
+        completed = threading.Event()
+
+        def execute_with_timeout():
+            """Execute the COM call in a separate thread with timeout."""
             try:
-                return func(*args)
+                result[0] = func(*args, **kwargs)
             except Exception as e:
+                error[0] = e
+            finally:
+                completed.set()
+
+        for attempt in range(retries):
+            # Start the operation in a separate thread
+            thread = threading.Thread(target=execute_with_timeout, daemon=True)
+            thread.start()
+
+            # Wait for completion or timeout
+            if not completed.wait(timeout=timeout):
+                logger.error(f"COM call timed out after {timeout} seconds (attempt {attempt + 1}/{retries})")
+                raise TimeoutError(f"COM operation timed out after {timeout} seconds")
+
+            # Check if thread completed with error
+            if error[0] is not None:
+                e = error[0]
                 error_str = str(e).lower()
                 if "rejected" in error_str or "call was rejected" in error_str:
                     if attempt < retries - 1:
@@ -97,7 +145,13 @@ class WordProcessor:
                         time.sleep(delay)
                         continue
                 logger.error(f"COM call failed after {attempt + 1} attempts: {e}")
-                raise
+                raise e
+
+            # Success - return result
+            return result[0]
+
+        # Should never reach here, but just in case
+        raise RuntimeError("COM call failed after all retries")
 
     def find_template_file(self, folder: str, template_name: str) -> Optional[str]:
         """
@@ -213,9 +267,39 @@ class WordProcessor:
         """
         Replace date placeholders in the document using regex patterns.
 
+        This method searches for dates in the Word document and replaces them with
+        the specified current_date. It uses Word's wildcard pattern syntax to find
+        and replace various date formats.
+
+        Date Formats Supported:
+            1. Day Shift Style (With Comma): "Sunday, January 04, 2026"
+               Pattern: "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}"
+
+            2. Night Shift Style (No Comma): "Saturday January 03, 2026"
+               Pattern: "[A-Za-z]@ [A-Za-z]@ [0-9]{1,2}, [0-9]{4}"
+
+            3. Fallback/Standard Style: "January 04, 2026"
+               Pattern: "[A-Za-z]@ [0-9]{1,2}, [0-9]{4}"
+
+        Word Wildcard Syntax:
+            - [A-Za-z]@   : One or more letters (day/month names)
+            - [0-9]{1,2}  : 1-2 digit numbers (day numbers)
+            - [0-9]{4}    : 4-digit numbers (years)
+
         Args:
             doc: The Word document object
-            current_date: The date to use for replacements
+            current_date: The date to use for replacements (formatted as weekday, month day, year)
+
+        Example:
+            Given current_date = date(2026, 1, 15):
+            - "Sunday, January 04, 2026" → "Thursday, January 15, 2026"
+            - "Saturday January 03, 2026" → "Thursday January 15, 2026"
+            - "January 04, 2026" → "January 15, 2026"
+
+        Note:
+            The day number has leading zeros stripped (e.g., "04" becomes "4").
+            All replacements are performed across all story ranges in the document,
+            including headers, footers, and text boxes.
         """
         # Format date components
         new_day = current_date.strftime("%A")
