@@ -53,6 +53,7 @@ class ScheduleAppUI:
         self.progress_var: Optional[tk.DoubleVar] = None
         self.progress: Optional[ttk.Progressbar] = None
         self.print_btn: Optional[tk.Button] = None
+        self.cancel_btn: Optional[tk.Button] = None
 
         # Callback for configuration changes
         self._on_config_change: Optional[Callable[[], None]] = None
@@ -203,13 +204,26 @@ class ScheduleAppUI:
                                       maximum=PROGRESS_MAX, style="Horizontal.TProgressbar")
         self.progress.pack(fill="x", pady=(0, 24))
 
+        # Button Row
+        button_row = ttk.Frame(footer)
+        button_row.pack(fill="x")
+
         # Print Button
         self.print_btn = tk.Button(
-            footer, text="START EXECUTION",
+            button_row, text="START EXECUTION",
             bg=COLORS.accent, fg="#FFFFFF", font=FONTS.button,
             relief="flat", pady=18, cursor="hand2", activebackground=COLORS.accent_hover
         )
-        self.print_btn.pack(fill="x")
+        self.print_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        # Cancel Button
+        self.cancel_btn = tk.Button(
+            button_row, text="CANCEL",
+            bg=COLORS.border, fg=COLORS.text_main, font=FONTS.button,
+            relief="flat", pady=18, cursor="hand2", activebackground=COLORS.secondary,
+            state="disabled"
+        )
+        self.cancel_btn.pack(side="right", fill="x", expand=True, padx=(6, 0))
 
     def _create_path_row(self, parent: ttk.Frame, label: str, default_val: str) -> ttk.Entry:
         """
@@ -291,6 +305,16 @@ class ScheduleAppUI:
         if self.print_btn:
             self.print_btn.config(command=command)
 
+    def set_cancel_command(self, command: Callable[[], None]) -> None:
+        """
+        Set the command for the cancel button.
+
+        Args:
+            command: Function to call when button is clicked
+        """
+        if self.cancel_btn:
+            self.cancel_btn.config(command=command)
+
     def set_config_change_callback(self, callback: Callable[[], None]) -> None:
         """
         Set a callback to be called when configuration changes.
@@ -310,17 +334,27 @@ class ScheduleAppUI:
         if self.print_btn:
             self.print_btn.config(state=state)
 
-    def update_status(self, message: str, progress: float) -> None:
+    def set_cancel_button_state(self, state: str) -> None:
+        """
+        Set the cancel button state.
+
+        Args:
+            state: Either "normal" or "disabled"
+        """
+        if self.cancel_btn:
+            self.cancel_btn.config(state=state)
+
+    def update_status(self, message: str, progress: Optional[float]) -> None:
         """
         Update the status label and progress bar.
 
         Args:
             message: Status message to display
-            progress: Progress value (0-100)
+            progress: Progress value (0-100), or None to keep current value
         """
         if self.status_label:
             self.status_label.config(text=message)
-        if self.progress_var:
+        if self.progress_var and progress is not None:
             self.progress_var.set(progress)
 
     def show_error(self, title: str, message: str) -> None:

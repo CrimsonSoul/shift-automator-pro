@@ -38,12 +38,14 @@ class ShiftAutomatorApp:
         self.config_manager = ConfigManager()
         self.word_processor: Optional[WordProcessor] = None
         self._processing_thread: Optional[threading.Thread] = None
+        self._cancel_requested = False
 
         # Load and apply saved configuration
         self._load_config()
 
-        # Set up button command
+        # Set up button commands
         self.ui.set_start_command(self.start_processing)
+        self.ui.set_cancel_command(self.cancel_processing)
 
         # Set up config change callback to save configuration on changes
         self.ui.set_config_change_callback(self._save_current_config)
@@ -139,8 +141,12 @@ class ShiftAutomatorApp:
             self.ui.show_warning("Validation Error", error_msg)
             return
 
-        # Disable button
+        # Reset cancellation flag
+        self._cancel_requested = False
+
+        # Update UI for processing state
         self.ui.set_print_button_state("disabled")
+        self.ui.set_cancel_button_state("normal")
 
         # Start processing thread
         self._processing_thread = threading.Thread(
@@ -148,6 +154,14 @@ class ShiftAutomatorApp:
             daemon=True
         )
         self._processing_thread.start()
+
+    def cancel_processing(self) -> None:
+        """Request cancellation of the current batch processing."""
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._cancel_requested = True
+            self.ui.update_status("Cancellation requested, finishing current document...", None)
+            self.ui.set_cancel_button_state("disabled")
+            logger.info("User requested cancellation of batch processing")
 
     def _process_batch(self) -> None:
         """Process the batch of schedules."""
@@ -172,9 +186,16 @@ class ShiftAutomatorApp:
         # Track failed operations
         failed_operations = []
 
+        cancelled = False
         try:
             with WordProcessor() as word_proc:
                 for i in range(total_days):
+                    # Check for cancellation request
+                    if self._cancel_requested:
+                        cancelled = True
+                        logger.info(f"Processing cancelled by user after {i} of {total_days} days")
+                        break
+
                     current_date = start_date + timedelta(days=i)
                     day_name = current_date.strftime("%A")
                     display_date = current_date.strftime("%m/%d/%Y")
@@ -198,6 +219,12 @@ class ShiftAutomatorApp:
                         })
                         logger.error(f"Failed to print day shift for {current_date}: {error}")
 
+                    # Check for cancellation request before night shift
+                    if self._cancel_requested:
+                        cancelled = True
+                        logger.info(f"Processing cancelled by user after day shift of {current_date}")
+                        break
+
                     # Process Night Shift
                     night_template = get_shift_template_name(current_date, "night")
                     success, error = word_proc.print_document(
@@ -212,17 +239,25 @@ class ShiftAutomatorApp:
                         })
                         logger.error(f"Failed to print night shift for {current_date}: {error}")
 
-                # Complete
-                self.root.after(0, lambda: self.ui.update_status("Complete!", PROGRESS_MAX))
-
-                # Show results
-                if failed_operations:
-                    self._show_failure_summary(failed_operations)
-                else:
-                    self.root.after(0, lambda: self.ui.show_info(
-                        "Success",
-                        f"All {total_days} days have been processed and sent to the printer."
+                # Show completion status
+                if cancelled:
+                    processed_days = i if self._cancel_requested else i + 1
+                    self.root.after(0, lambda: self.ui.update_status("Cancelled", progress))
+                    self.root.after(0, lambda pd=processed_days, td=total_days: self.ui.show_info(
+                        "Processing Cancelled",
+                        f"Cancelled by user.\n\nProcessed {pd} of {td} days before cancellation."
                     ))
+                else:
+                    self.root.after(0, lambda: self.ui.update_status("Complete!", PROGRESS_MAX))
+
+                    # Show results
+                    if failed_operations:
+                        self._show_failure_summary(failed_operations)
+                    else:
+                        self.root.after(0, lambda: self.ui.show_info(
+                            "Success",
+                            f"All {total_days} days have been processed and sent to the printer."
+                        ))
 
         except Exception as e:
             logger.exception("Error during batch processing")
@@ -231,8 +266,9 @@ class ShiftAutomatorApp:
                 f"An error occurred during processing: {str(e)}"
             ))
         finally:
-            # Re-enable button
+            # Re-enable buttons
             self.root.after(0, lambda: self.ui.set_print_button_state("normal"))
+            self.root.after(0, lambda: self.ui.set_cancel_button_state("disabled"))
 
     def _show_failure_summary(self, failed_operations: list[dict]) -> None:
         """

@@ -101,9 +101,9 @@ class WordProcessor:
 
     def find_template_file(self, folder: str, template_name: str) -> Optional[str]:
         """
-        Find a template file in the given folder.
+        Find a template file in the given folder using exact name matching.
 
-        First tries exact match, then falls back to partial match.
+        Searches for files with exact case-insensitive match of template name.
 
         Args:
             folder: The folder to search in
@@ -120,33 +120,24 @@ class WordProcessor:
 
         try:
             files = os.listdir(folder)
-            exact_match = None
-            partial_match = None
 
-            # Search for .docx files
+            # Construct expected filename
+            expected_filename = f"{template_name}{DOCX_EXTENSION}"
+
+            # Search for exact match (case-insensitive)
             for f in files:
                 if not f.lower().endswith(DOCX_EXTENSION):
                     continue
 
-                # Try exact match first
-                if f.lower() == f"{template_name.lower()}{DOCX_EXTENSION}":
-                    exact_match = os.path.join(folder, f)
-                    logger.debug(f"Found exact match: {exact_match}")
-                    break
+                # Exact match (case-insensitive)
+                if f.lower() == expected_filename.lower():
+                    target_file = os.path.join(folder, f)
+                    logger.info(f"Found template: {target_file}")
+                    return target_file
 
-                # Fall back to partial match
-                if template_name.lower() in f.lower() and partial_match is None:
-                    partial_match = os.path.join(folder, f)
-                    logger.debug(f"Found partial match: {partial_match}")
-
-            target_file = exact_match or partial_match
-
-            if target_file:
-                logger.info(f"Found template: {target_file}")
-            else:
-                logger.warning(f"Template not found: {template_name} in {folder}")
-
-            return target_file
+            # No match found
+            logger.warning(f"Template not found: {expected_filename} in {folder}")
+            return None
 
         except OSError as e:
             logger.error(f"Error listing files in {folder}: {e}")

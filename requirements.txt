@@ -3,4 +3,4 @@
 
 pywin32==306
 tkcalendar==1.6.1
-babel==2.14.0
+babel==2.16.0
