@@ -5,11 +5,11 @@ This module sets up the logging system with both file and console handlers.
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
 from .constants import LOG_FILENAME
+from .utils import get_app_data_dir
 
 
 def _get_default_log_dir() -> Path:
@@ -19,22 +19,7 @@ def _get_default_log_dir() -> Path:
     Returns:
         Path to the default log directory
     """
-    if os.name == 'nt':  # Windows
-        # Use %LOCALAPPDATA% for Windows
-        appdata = os.environ.get('LOCALAPPDATA')
-        if appdata:
-            return Path(appdata) / 'ShiftAutomator'
-        # Fallback to user profile
-        user_profile = os.environ.get('USERPROFILE')
-        if user_profile:
-            return Path(user_profile) / '.shift_automator'
-    else:  # macOS/Linux
-        # Use ~/.local/share for Linux/macOS
-        home = Path.home()
-        return home / '.local' / 'share' / 'shift_automator'
-    
-    # Final fallback to current directory
-    return Path('.')
+    return get_app_data_dir("ShiftAutomator")
 
 
 def setup_logging(

@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, call
 import pytest
 
-from src.word_processor import WordProcessor, TimeoutError, HAS_PYWIN32
+from src.word_processor import WordProcessor, HAS_PYWIN32
 from src.constants import DOCX_EXTENSION
 
 
@@ -24,7 +24,6 @@ class TestWordProcessor:
         processor = WordProcessor()
         assert processor.word_app is None
         assert processor._initialized is False
-        assert processor._com_lock is not None
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
@@ -159,37 +158,11 @@ class TestWordProcessor:
         assert result == "success"
         mock_func.assert_called_once_with("arg1", "arg2")
 
-    @pytest.mark.skip(reason="Threading timeout test requires precise timing, may be flaky on CI")
-    def test_safe_com_call_with_timeout(self):
-        """Test safe COM call respects timeout."""
-        import threading
 
-        processor = WordProcessor()
-
-        # Use an Event that never gets set to truly block
-        block_event = threading.Event()
-
-        def hanging_func():
-            block_event.wait(timeout=10)  # Block for 10 seconds
-
-        # Spawn a thread to set the event after delay to ensure we timeout first
-        def timeout_early():
-            import time
-            time.sleep(0.5)  # Wait longer than test timeout
-            block_event.set()  # This shouldn't be reached
-
-        timeout_thread = threading.Thread(target=timeout_early, daemon=True)
-        timeout_thread.start()
-
-        with patch('src.word_processor.COM_TIMEOUT', 0.1):  # 100ms timeout
-            with pytest.raises(TimeoutError) as exc_info:
-                processor.safe_com_call(hanging_func)
-            assert "timed out" in str(exc_info.value)
-
-    @pytest.mark.skip(reason="Mock retry behavior with threading is complex to test reliably")
     def test_safe_com_call_retry_on_rejection(self):
         """Test safe COM call retries on call rejection."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
+
         processor = WordProcessor()
 
         mock_func = MagicMock()
@@ -198,7 +171,9 @@ class TestWordProcessor:
             "success"
         ]
 
-        result = processor.safe_com_call(mock_func, retries=2, delay=0.01)
+        # Mock time.sleep to avoid actual delays in tests
+        with patch('time.sleep'):
+            result = processor.safe_com_call(mock_func, retries=2, delay=0.01)
 
         assert result == "success"
         assert mock_func.call_count == 2
@@ -260,13 +235,22 @@ class TestWordProcessor:
 
         processor.replace_dates(mock_doc, test_date)
 
-        # Should call Execute multiple times for different patterns
+        # Should call Execute 3 times: 1 for placeholder, 2 for patterns
         assert mock_find.Execute.call_count == 3
+        
+        # Verify first call is for the DATE_PLACEHOLDER
+        from src.constants import DATE_PLACEHOLDER
+        first_call_args = mock_find.Execute.call_args_list[0]
+        assert first_call_args[0][0] == DATE_PLACEHOLDER
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_print_document_success(self, mock_win32, mock_pythoncom, tmp_path):
+    @patch('src.word_processor.win32print')
+    def test_print_document_success(self, mock_win32print, mock_win32, mock_pythoncom, tmp_path):
         """Test successful document printing."""
+        # Mock printer status to be ready
+        mock_win32print.OpenPrinter.return_value = 1
+        mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
         mock_win32.Dispatch.return_value = mock_word_app
 
@@ -298,8 +282,12 @@ class TestWordProcessor:
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_print_document_template_not_found(self, mock_win32, mock_pythoncom):
+    @patch('src.word_processor.win32print')
+    def test_print_document_template_not_found(self, mock_win32print, mock_win32, mock_pythoncom):
         """Test printing with missing template."""
+        # Mock printer status to be ready
+        mock_win32print.OpenPrinter.return_value = 1
+        mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
         mock_win32.Dispatch.return_value = mock_word_app
 
@@ -318,8 +306,12 @@ class TestWordProcessor:
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_print_document_unprotect(self, mock_win32, mock_pythoncom):
+    @patch('src.word_processor.win32print')
+    def test_print_document_unprotect(self, mock_win32print, mock_win32, mock_pythoncom):
         """Test document is unprotected before modification."""
+        # Mock printer status to be ready
+        mock_win32print.OpenPrinter.return_value = 1
+        mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
         mock_win32.Dispatch.return_value = mock_word_app
 
@@ -352,8 +344,12 @@ class TestWordProcessorIntegration:
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_print_multiple_documents(self, mock_win32, mock_pythoncom, tmp_path):
+    @patch('src.word_processor.win32print')
+    def test_print_multiple_documents(self, mock_win32print, mock_win32, mock_pythoncom, tmp_path):
         """Test printing multiple documents in sequence."""
+        # Mock printer status to be ready
+        mock_win32print.OpenPrinter.return_value = 1
+        mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
         mock_win32.Dispatch.return_value = mock_word_app
 

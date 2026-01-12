@@ -39,6 +39,9 @@ DOCX_EXTENSION: Final = ".docx"
 CONFIG_FILENAME: Final = "config.json"
 LOG_FILENAME: Final = "shift_automator.log"
 
+# Replacement Tokens
+DATE_PLACEHOLDER: Final = "{{DATE}}"
+
 # UI Constants
 WINDOW_WIDTH: Final = 640
 WINDOW_HEIGHT: Final = 720

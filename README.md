@@ -27,6 +27,8 @@ A high-performance, modern desktop application for automating the management and
 
 Download the latest `Shift Automator Pro.exe` from the [Releases](https://github.com/yourusername/shift-automator/releases) page. No installation required.
 
+> **Note:** Update this URL with your actual repository URL before releasing.
+
 ### Option 2: Run from Source
 
 1. Clone the repository:
@@ -77,6 +79,7 @@ schedule_app/
 │   ├── path_validation.py    # Path validation and security
 │   ├── scheduler.py          # Date and scheduling logic
 │   ├── ui.py                 # UI components
+│   ├── utils.py              # Shared utility functions
 │   ├── word_processor.py     # Word document processing
 │   └── main.py              # Main application controller
 ├── tests/
@@ -89,6 +92,44 @@ schedule_app/
 ├── requirements-dev.txt      # Development dependencies
 ├── pytest.ini              # Pytest configuration
 └── README.md
+```
+
+## 🏗️ Architecture
+
+```mermaid
+graph TB
+    subgraph UI Layer
+        A[ScheduleAppUI] --> B[DateEntry]
+        A --> C[ttk.Entry]
+        A --> D[ttk.OptionMenu]
+        A --> E[Progressbar]
+    end
+    
+    subgraph Application Layer
+        F[ShiftAutomatorApp] --> A
+        F --> G[ConfigManager]
+        F --> H[WordProcessor]
+        F --> I[Scheduler]
+    end
+    
+    subgraph Business Logic
+        I --> J[is_third_thursday]
+        I --> K[get_shift_template_name]
+        I --> L[validate_date_range]
+    end
+    
+    subgraph External Services
+        H --> M[Word COM]
+        H --> N[win32print]
+    end
+    
+    subgraph Data Layer
+        G --> O[config.json]
+        P[Logger] --> Q[shift_automator.log]
+    end
+    
+    F --> P
+    F --> R[path_validation]
 ```
 
 ## 🧪 Testing

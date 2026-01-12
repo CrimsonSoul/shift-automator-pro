@@ -5,8 +5,8 @@ This module contains all Tkinter UI components and styling.
 """
 
 import os
-import sys
 import tkinter as tk
+from datetime import date
 from tkinter import messagebox, filedialog, ttk
 from tkcalendar import DateEntry
 from typing import Optional, Callable, List, Any
@@ -315,7 +315,7 @@ class ScheduleAppUI:
         """Get the selected printer name."""
         return self.printer_var.get() if self.printer_var else ""
 
-    def get_start_date(self) -> Optional[Any]:
+    def get_start_date(self) -> Optional[date]:
         """
         Get the start date.
 
@@ -324,7 +324,7 @@ class ScheduleAppUI:
         """
         return self.start_date_picker.get_date() if self.start_date_picker else None
 
-    def get_end_date(self) -> Optional[Any]:
+    def get_end_date(self) -> Optional[date]:
         """
         Get the end date.
 

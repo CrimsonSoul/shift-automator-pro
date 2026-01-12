@@ -77,10 +77,12 @@ class ShiftAutomatorApp:
         self.word_processor: Optional[WordProcessor] = None
         self._processing_thread: Optional[threading.Thread] = None
         self._cancel_requested = False
+        self._cancel_lock = threading.Lock()
 
         # Config debouncing
         self._config_save_pending = False
         self._config_save_timer: Optional[threading.Timer] = None
+        self._config_save_lock = threading.Lock()
 
         # Load and apply saved configuration
         self._load_config()
@@ -127,26 +129,28 @@ class ShiftAutomatorApp:
 
     def _schedule_config_save(self) -> None:
         """Schedule a debounced configuration save."""
-        # Cancel any pending save timer
-        if self._config_save_timer is not None:
-            self._config_save_timer.cancel()
+        with self._config_save_lock:
+            # Cancel any pending save timer
+            if self._config_save_timer is not None:
+                self._config_save_timer.cancel()
 
-        # Set flag that save is pending
-        self._config_save_pending = True
+            # Set flag that save is pending
+            self._config_save_pending = True
 
-        # Schedule new save
-        self._config_save_timer = threading.Timer(
-            CONFIG_DEBOUNCE_DELAY,
-            self._save_config_if_pending
-        )
-        self._config_save_timer.start()
+            # Schedule new save
+            self._config_save_timer = threading.Timer(
+                CONFIG_DEBOUNCE_DELAY,
+                self._save_config_if_pending
+            )
+            self._config_save_timer.start()
 
     def _save_config_if_pending(self) -> None:
         """Save configuration if a save is pending (called by timer)."""
-        if self._config_save_pending:
-            self._save_current_config()
-            self._config_save_pending = False
-            self._config_save_timer = None
+        with self._config_save_lock:
+            if self._config_save_pending:
+                self._save_current_config()
+                self._config_save_pending = False
+                self._config_save_timer = None
 
     def _save_current_config(self) -> None:
         """Save the current configuration from UI to file."""
@@ -247,9 +251,10 @@ class ShiftAutomatorApp:
 
         for attempt in range(PRINT_MAX_RETRIES):
             # Check for cancellation before retry
-            if self._cancel_requested:
-                logger.info(f"Print cancelled during retry attempt {attempt + 1}")
-                return False, "Cancelled by user"
+            with self._cancel_lock:
+                if self._cancel_requested:
+                    logger.info(f"Print cancelled during retry attempt {attempt + 1}")
+                    return False, "Cancelled by user"
 
             # Attempt to print
             success, error = word_proc.print_document(
@@ -307,14 +312,17 @@ class ShiftAutomatorApp:
         failed_operations = []
 
         cancelled = False
+        processed_days = 0
         try:
             with WordProcessor() as word_proc:
                 for i in range(total_days):
                     # Check for cancellation request
-                    if self._cancel_requested:
-                        cancelled = True
-                        logger.info(f"Processing cancelled by user after {i} of {total_days} days")
-                        break
+                    with self._cancel_lock:
+                        if self._cancel_requested:
+                            cancelled = True
+                            processed_days = i
+                            logger.info(f"Processing cancelled by user after {i} of {total_days} days")
+                            break
 
                     current_date = start_date + timedelta(days=i)
                     day_name = current_date.strftime("%A")
@@ -340,10 +348,12 @@ class ShiftAutomatorApp:
                         logger.error(f"Failed to print day shift for {current_date}: {error}")
 
                     # Check for cancellation request before night shift
-                    if self._cancel_requested:
-                        cancelled = True
-                        logger.info(f"Processing cancelled by user after day shift of {current_date}")
-                        break
+                    with self._cancel_lock:
+                        if self._cancel_requested:
+                            cancelled = True
+                            processed_days = i + 1
+                            logger.info(f"Processing cancelled by user after day shift of {current_date}")
+                            break
 
                     # Process Night Shift
                     night_template = get_shift_template_name(current_date, "night")
@@ -361,7 +371,6 @@ class ShiftAutomatorApp:
 
                 # Show completion status
                 if cancelled:
-                    processed_days = i if self._cancel_requested else i + 1
                     self.root.after(0, lambda: self.ui.update_status("Cancelled", progress))
                     self.root.after(0, lambda pd=processed_days, td=total_days: self.ui.show_info(
                         "Processing Cancelled",

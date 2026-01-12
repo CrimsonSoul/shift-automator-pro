@@ -5,13 +5,13 @@ This module handles loading, saving, and validating configuration settings.
 """
 
 import json
-import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from .constants import CONFIG_FILENAME
 from .logger import get_logger
+from .utils import get_app_data_dir
 
 logger = get_logger(__name__)
 
@@ -23,22 +23,7 @@ def _get_default_config_dir() -> Path:
     Returns:
         Path to the default config directory
     """
-    if os.name == 'nt':  # Windows
-        # Use %LOCALAPPDATA% for Windows
-        appdata = os.environ.get('LOCALAPPDATA')
-        if appdata:
-            return Path(appdata) / 'ShiftAutomator'
-        # Fallback to user profile
-        user_profile = os.environ.get('USERPROFILE')
-        if user_profile:
-            return Path(user_profile) / '.shift_automator'
-    else:  # macOS/Linux
-        # Use ~/.local/share for Linux/macOS
-        home = Path.home()
-        return home / '.local' / 'share' / 'shift_automator'
-    
-    # Final fallback to current directory
-    return Path('.')
+    return get_app_data_dir("ShiftAutomator")
 
 
 @dataclass
@@ -68,9 +53,9 @@ class AppConfig:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        if self.day_folder and not os.path.isdir(self.day_folder):
+        if self.day_folder and not Path(self.day_folder).is_dir():
             return False, f"Day folder does not exist: {self.day_folder}"
-        if self.night_folder and not os.path.isdir(self.night_folder):
+        if self.night_folder and not Path(self.night_folder).is_dir():
             return False, f"Night folder does not exist: {self.night_folder}"
         return True, None
 
