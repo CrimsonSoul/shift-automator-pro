@@ -38,7 +38,7 @@ from .constants import (
     PRINTER_STATUS_ERROR
 )
 from .logger import get_logger
-from .path_validation import validate_folder_path, is_path_within_base
+from .path_validation import validate_folder_path
 
 logger = get_logger(__name__)
 
@@ -94,16 +94,26 @@ class WordProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the Word application instance."""
-        if self.word_app:
-            try:
-                self.word_app.Quit()
-                logger.info("Word application shut down")
-            except Exception as e:
-                logger.warning(f"Error shutting down Word: {e}")
-            finally:
-                self.word_app = None
-                self._initialized = False
-                pythoncom.CoUninitialize()
+        if not self.word_app:
+            return
+
+        # Warn if shutdown is called from a different thread than initialization
+        current_thread = threading.get_ident()
+        if self._thread_id is not None and current_thread != self._thread_id:
+            logger.warning(
+                f"shutdown() called from thread {current_thread}, but COM was initialized on thread {self._thread_id}. "
+                f"This may cause COM cleanup issues."
+            )
+
+        try:
+            self.word_app.Quit()
+            logger.info("Word application shut down")
+        except Exception as e:
+            logger.warning(f"Error shutting down Word: {e}")
+        finally:
+            self.word_app = None
+            self._initialized = False
+            pythoncom.CoUninitialize()
 
     def safe_com_call(self, func: Callable[..., Any], *args: Any,
                       retries: int = COM_RETRIES, delay: float = COM_RETRY_DELAY,
@@ -400,11 +410,13 @@ class WordProcessor:
             replace_text,   # ReplaceWith
             2               # Replace (wdReplaceAll)
         )
-        if not success and is_wildcard:
-            # Note: Execute returns True if any match was found.
-            # We don't necessarily want to raise an error if a wildcard match wasn't found,
-            # but for explicit {{DATE}} placeholders, we might want to know.
-            pass
+        if not success:
+            if is_wildcard:
+                # Wildcard patterns not matching is expected (template may use different date format)
+                logger.debug(f"Wildcard pattern not found: {find_text[:50]}...")
+            else:
+                # Explicit placeholder not found - worth logging as it may indicate misconfigured template
+                logger.info(f"Placeholder not found in document: {find_text}")
 
     def __enter__(self):
         """Context manager entry."""
