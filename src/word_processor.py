@@ -31,7 +31,11 @@ from .constants import (
     CLOSE_NO_SAVE,
     COM_RETRIES,
     COM_RETRY_DELAY,
-    DATE_PLACEHOLDER
+    DATE_PLACEHOLDER,
+    COM_ERROR_RPC_CALL_REJECTED,
+    COM_ERROR_RPC_SERVERCALL_RETRYLATER,
+    PRINTER_STATUS_OFFLINE,
+    PRINTER_STATUS_ERROR
 )
 from .logger import get_logger
 from .path_validation import validate_folder_path, is_path_within_base
@@ -47,6 +51,7 @@ class WordProcessor:
         """Initialize WordProcessor."""
         self.word_app: Optional[Any] = None
         self._initialized = False
+        self._thread_id: Optional[int] = None  # Track which thread initialized COM
 
     def initialize(self) -> None:
         """
@@ -64,8 +69,11 @@ class WordProcessor:
                 "Current platform: " + sys.platform
             )
 
+        com_initialized = False
         try:
             pythoncom.CoInitialize()  # type: ignore
+            com_initialized = True
+            self._thread_id = threading.get_ident()  # Record which thread initialized COM
             self.word_app = win32com.client.Dispatch("Word.Application")  # type: ignore
             self.word_app.Visible = False
             self.word_app.DisplayAlerts = 0
@@ -73,8 +81,14 @@ class WordProcessor:
             # wdSecurityPolicy = 4 (Disable all macros without notification)
             self.word_app.AutomationSecurity = 4
             self._initialized = True
-            logger.info("Word application initialized")
+            logger.info(f"Word application initialized on thread {self._thread_id}")
         except Exception as e:
+            # Clean up COM if it was initialized but Word creation failed
+            if com_initialized:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception as cleanup_error:
+                    logger.warning(f"Error during COM cleanup after failed initialization: {cleanup_error}")
             logger.error(f"Failed to initialize Word application: {e}")
             raise RuntimeError(f"Could not initialize Word: {e}") from e
 
@@ -96,42 +110,62 @@ class WordProcessor:
                       **kwargs: Any) -> Any:
         """
         Execute a COM call with retry logic for transient errors (like "Call rejected").
-        
+
         Note: This MUST be called from the same thread that initialized Word.
-        
+
         Args:
             func: The COM function to call
             *args: Arguments to pass to the function
             **kwargs: Keyword arguments to pass to the function
-            retries: Number of retry attempts
+            retries: Number of retry attempts (minimum 1, will always try at least once)
             delay: Delay between retries in seconds
 
         Returns:
             The result of the function call
 
         Raises:
+            RuntimeError: If called from wrong thread
             Exception: If all retry attempts fail
         """
+        # Enforce thread affinity for COM objects
+        current_thread = threading.get_ident()
+        if self._thread_id is not None and current_thread != self._thread_id:
+            raise RuntimeError(
+                f"COM call attempted from wrong thread. "
+                f"Initialized on thread {self._thread_id}, called from thread {current_thread}. "
+                f"COM objects must be used on the same thread they were created on."
+            )
+
+        # Ensure at least one attempt
+        max_attempts = max(1, retries)
         last_error = None
-        for attempt in range(retries):
+
+        for attempt in range(max_attempts):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
                 # "Call was rejected by callee" is a common transient COM error
-                if "rejected" in error_str or "0x80010101" in error_str or "0x80010001" in error_str:
-                    if attempt < retries - 1:
-                        logger.debug(f"COM call rejected, retrying ({attempt + 1}/{retries}) in {delay}s...")
+                if ("rejected" in error_str or
+                    COM_ERROR_RPC_SERVERCALL_RETRYLATER.lower() in error_str or
+                    COM_ERROR_RPC_CALL_REJECTED.lower() in error_str):
+                    if attempt < max_attempts - 1:
+                        logger.debug(f"COM call rejected, retrying ({attempt + 1}/{max_attempts}) in {delay}s...")
                         time.sleep(delay)
                         continue
-                
-                logger.error(f"COM call failed: {e}")
+
+                # Non-retriable error, fail immediately
+                logger.error(f"COM call failed with non-retriable error: {e}")
                 raise e
 
+        # All retry attempts exhausted for rejection errors
         if last_error:
+            logger.error(f"COM call failed after {max_attempts} attempts (all rejected)")
             raise last_error
-        raise RuntimeError("COM call failed after all retries")
+
+        # This should never happen (loop should always execute at least once)
+        raise RuntimeError("COM call failed unexpectedly")
 
     def find_template_file(self, folder: str, template_name: str) -> Optional[str]:
         """
@@ -207,15 +241,13 @@ class WordProcessor:
         # Edge Case: Verify printer is ready/online (Windows only)
         if HAS_PYWIN32 and win32print:
             try:
-                # PRINTER_STATUS_OFFLINE = 0x00000080
-                # PRINTER_STATUS_ERROR = 0x00000002
                 phandle = win32print.OpenPrinter(printer_name)
                 try:
                     pinfo = win32print.GetPrinter(phandle, 2)
                     status = pinfo.get('Status', 0)
-                    if status & 0x00000080: # Offline
+                    if status & PRINTER_STATUS_OFFLINE:
                         return False, f"Printer '{printer_name}' is offline."
-                    if status & 0x00000002: # Error
+                    if status & PRINTER_STATUS_ERROR:
                         return False, f"Printer '{printer_name}' reported an error state."
                 finally:
                     win32print.ClosePrinter(phandle)
@@ -265,12 +297,14 @@ class WordProcessor:
             return False, str(e)
 
         finally:
-            # Ensure document is closed
+            # Ensure document is closed (use simple call to avoid masking original error)
             if doc:
                 try:
-                    self.safe_com_call(doc.Close, CLOSE_NO_SAVE)
+                    # Use direct COM call without retries to fail fast in cleanup
+                    doc.Close(CLOSE_NO_SAVE)
                 except Exception as e:
-                    logger.warning(f"Error closing document: {e}")
+                    # Log but don't raise - we don't want cleanup to mask the original error
+                    logger.warning(f"Error closing document in cleanup: {e}")
 
     def replace_dates(self, doc: Any, current_date: date) -> None:
         """
@@ -296,16 +330,20 @@ class WordProcessor:
         self._execute_replace(doc, DATE_PLACEHOLDER, placeholder_text, is_wildcard=False)
 
         # 2. Fallback: Pattern matching (RISKIER - matches existing dates)
-        # Note: We use specific patterns to reduce false positives
+        # Note: We use specific patterns with day/month names to reduce false positives
+        # Build pattern that matches actual day and month names
+        day_names = "(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)"
+        month_names = "(January|February|March|April|May|June|July|August|September|October|November|December)"
+
         patterns = [
-            # Style 1: "Sunday, January 04, 2026"
+            # Style 1: "Sunday, January 04, 2026" (with comma after day)
             (
-                "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                f"{day_names}, {month_names} [0-9]{{1,2}}, [0-9]{{4}}",
                 f"{new_day}, {new_month} {new_day_num}, {new_year}"
             ),
-            # Style 2: "Saturday January 03, 2026"
+            # Style 2: "Saturday January 03, 2026" (no comma after day)
             (
-                "[A-Za-z]@ [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                f"{day_names} {month_names} [0-9]{{1,2}}, [0-9]{{4}}",
                 f"{new_day} {new_month} {new_day_num}, {new_year}"
             ),
         ]

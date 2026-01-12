@@ -55,6 +55,14 @@ COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
 COM_TIMEOUT: Final = 30  # seconds - timeout for COM operations
 
+# COM Error Codes (hexadecimal)
+COM_ERROR_RPC_CALL_REJECTED: Final = "0x80010001"  # RPC_E_CALL_REJECTED
+COM_ERROR_RPC_SERVERCALL_RETRYLATER: Final = "0x80010101"  # RPC_E_SERVERCALL_RETRYLATER
+
+# Printer Status Flags (from Windows API)
+PRINTER_STATUS_OFFLINE: Final = 0x00000080
+PRINTER_STATUS_ERROR: Final = 0x00000002
+
 # Retry settings for print operations
 PRINT_MAX_RETRIES: Final = 3
 PRINT_INITIAL_DELAY: Final = 2.0  # seconds

@@ -148,9 +148,22 @@ class ShiftAutomatorApp:
         """Save configuration if a save is pending (called by timer)."""
         with self._config_save_lock:
             if self._config_save_pending:
-                self._save_current_config()
-                self._config_save_pending = False
-                self._config_save_timer = None
+                try:
+                    self._save_current_config()
+                except Exception as e:
+                    logger.error(f"Failed to save config: {e}")
+                    # Show error to user (schedule on main thread)
+                    try:
+                        self.root.after(0, lambda: self.ui.show_warning(
+                            "Configuration Save Error",
+                            f"Could not save configuration: {e}\n\nYour settings may not be preserved."
+                        ))
+                    except Exception as ui_error:
+                        logger.error(f"Could not show config save error to user: {ui_error}")
+                finally:
+                    # Always clear the pending flags to allow future saves
+                    self._config_save_pending = False
+                    self._config_save_timer = None
 
     def _save_current_config(self) -> None:
         """Save the current configuration from UI to file."""
@@ -227,7 +240,8 @@ class ShiftAutomatorApp:
     def cancel_processing(self) -> None:
         """Request cancellation of the current batch processing."""
         if self._processing_thread and self._processing_thread.is_alive():
-            self._cancel_requested = True
+            with self._cancel_lock:
+                self._cancel_requested = True
             self.ui.update_status("Cancellation requested, finishing current document...", None)
             self.ui.set_cancel_button_state("disabled")
             logger.info("User requested cancellation of batch processing")
@@ -291,10 +305,11 @@ class ShiftAutomatorApp:
         printer_name = self.ui.get_printer_name()
 
         # Cancel any pending config save and save immediately before processing
-        if self._config_save_timer is not None:
-            self._config_save_timer.cancel()
-            self._config_save_timer = None
-        self._config_save_pending = False
+        with self._config_save_lock:
+            if self._config_save_timer is not None:
+                self._config_save_timer.cancel()
+                self._config_save_timer = None
+            self._config_save_pending = False
 
         # Save configuration
         config = AppConfig(
@@ -312,15 +327,19 @@ class ShiftAutomatorApp:
         failed_operations = []
 
         cancelled = False
+        # processed_days tracking: counts fully or partially completed days
+        # - If cancelled before processing day i: processed_days = i (i days completed)
+        # - If cancelled after day shift of day i: processed_days = i+1 (day i partially done)
         processed_days = 0
+        progress = 0.0  # Initialize progress for early cancellation case
         try:
             with WordProcessor() as word_proc:
                 for i in range(total_days):
-                    # Check for cancellation request
+                    # Check for cancellation request before processing this day
                     with self._cancel_lock:
                         if self._cancel_requested:
                             cancelled = True
-                            processed_days = i
+                            processed_days = i  # No work done on day i yet
                             logger.info(f"Processing cancelled by user after {i} of {total_days} days")
                             break
 
@@ -351,7 +370,7 @@ class ShiftAutomatorApp:
                     with self._cancel_lock:
                         if self._cancel_requested:
                             cancelled = True
-                            processed_days = i + 1
+                            processed_days = i + 1  # Day shift completed, so day i is partially done
                             logger.info(f"Processing cancelled by user after day shift of {current_date}")
                             break
 
