@@ -1,4 +1,5 @@
 import sys
+import os
 import pytest
 from unittest.mock import MagicMock
 
@@ -21,11 +22,13 @@ class FakeTk(MagicMock):
 mock_tk = MockModule()
 mock_tk.Tk = FakeTk
 
-sys.modules["tkinter"] = mock_tk
-sys.modules["tkinter.ttk"] = MockModule()
-sys.modules["tkinter.messagebox"] = MockModule()
-sys.modules["tkinter.filedialog"] = MockModule()
-sys.modules["tkcalendar"] = MockModule()
+# Always mock these in non-Windows or CI environments
+if sys.platform != "win32" or os.environ.get("GITHUB_ACTIONS") == "true":
+    sys.modules["tkinter"] = mock_tk
+    sys.modules["tkinter.ttk"] = MockModule()
+    sys.modules["tkinter.messagebox"] = MockModule()
+    sys.modules["tkinter.filedialog"] = MockModule()
+    sys.modules["tkcalendar"] = MockModule()
 
 @pytest.fixture
 def mock_wp():
