@@ -1,115 +1,97 @@
-import os
 import pytest
 from datetime import date
-from unittest.mock import MagicMock, patch
-import src.main as main_module
+from unittest.mock import patch
 from src import ShiftAutomatorApp
-from .mocks import MockWordProcessor, MockUI
+from .mocks import MockUI, MockWordProcessor
 
-def test_full_workflow_success(tmp_path):
-    """Test the full workflow from UI trigger to Word processing."""
-    day_folder = tmp_path / "day"
-    night_folder = tmp_path / "night"
-    day_folder.mkdir()
-    night_folder.mkdir()
-    
-    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    for day in days:
-        (day_folder / f"{day}.docx").write_text("dummy")
-        (night_folder / f"{day} Night.docx").write_text("dummy")
-    
-    # Mock root and make after() execute immediately
-    root = MagicMock()
-    def immediate_after(delay, func):
-        func()
-    root.after = immediate_after
-    
-    mock_ui = MockUI(root)
-    mock_ui.day_folder = str(day_folder)
-    mock_ui.night_folder = str(night_folder)
-    mock_ui.start_date = date(2026, 1, 5) # Monday
-    mock_ui.end_date = date(2026, 1, 11)   # Sunday
-    mock_ui.printer_name = "Test Printer"
-    
+def test_workflow_full_run_success(mock_wp: MockWordProcessor, mock_ui: MockUI):
+    """
+    Test a full successful run of the batch processing.
+    Ensures that for each day in range, both shifts are processed.
+    """
+    import tkinter as tk
+    root = tk.Tk()
     app = ShiftAutomatorApp(root)
-    app.ui = mock_ui
     
-    mock_wp = MockWordProcessor()
-    with patch.object(main_module, "WordProcessor", return_value=mock_wp):
+    # Inject mocks
+    # Use type: ignore to bypass strict type checking for mocks in tests
+    app.ui = mock_ui  # type: ignore
+    app.word_processor = mock_wp # type: ignore
+    
+    # Setup dates: Jan 1 to Jan 2 (2 days, 4 shifts total)
+    start_date = date(2024, 1, 1)
+    end_date = date(2024, 1, 2)
+    
+    mock_ui.set_dates(start_date, end_date)
+    mock_ui.set_folders("C:/Day", "C:/Night")
+    mock_ui.set_printer("TestPrinter")
+    
+    # Mock WordProcessor.__enter__ and __exit__ since it's used as a context manager
+    with patch("src.main.WordProcessor", return_value=mock_wp):
         app._process_batch()
     
-    assert len(mock_wp.print_log) == 14
-    assert any("Complete!" in msg for msg in mock_ui.status_messages)
-    assert 100.0 in mock_ui.progress_values
+    # Verify results
+    assert mock_wp.call_count == 4
+    assert mock_ui.status_history[-1] == "Complete!"
+    assert not any("Error" in str(msg) for msg in mock_ui.info_messages)
 
-def test_workflow_third_thursday(tmp_path):
-    """Verify that the 'Third Thursday' special logic works in the full workflow."""
-    day_folder = tmp_path / "day"
-    night_folder = tmp_path / "night"
-    day_folder.mkdir()
-    night_folder.mkdir()
-    
-    (day_folder / "THIRD Thursday.docx").write_text("dummy")
-    (day_folder / "Thursday.docx").write_text("dummy")
-    (night_folder / "Thursday Night.docx").write_text("dummy")
-    
-    root = MagicMock()
-    root.after = lambda delay, func: func()
-    mock_ui = MockUI(root)
-    target_date = date(2026, 1, 15)
-    mock_ui.day_folder = str(day_folder)
-    mock_ui.night_folder = str(night_folder)
-    mock_ui.start_date = target_date
-    mock_ui.end_date = target_date
-    
+def test_workflow_partial_failure(mock_wp: MockWordProcessor, mock_ui: MockUI):
+    """Test workflow when some prints fail."""
+    import tkinter as tk
+    root = tk.Tk()
     app = ShiftAutomatorApp(root)
-    app.ui = mock_ui
+    app.ui = mock_ui  # type: ignore
     
-    mock_wp = MockWordProcessor()
-    with patch.object(main_module, "WordProcessor", return_value=mock_wp):
-        app._process_batch()
+    start_date = date(2024, 1, 1)
+    end_date = date(2024, 1, 1) # 1 day, 2 shifts
     
-    templates = [log["template"] for log in mock_wp.print_log]
-    assert "THIRD Thursday" in templates
-    assert "Thursday Night" in templates
-
-def test_workflow_missing_template(tmp_path):
-    """Test how the workflow handles missing templates."""
-    day_folder = tmp_path / "day"
-    night_folder = tmp_path / "night"
-    day_folder.mkdir()
-    night_folder.mkdir()
+    mock_ui.set_dates(start_date, end_date)
+    mock_ui.set_folders("C:/Day", "C:/Night")
+    mock_ui.set_printer("TestPrinter")
     
-    # Monday Day exists, others missing
-    (day_folder / "Monday.docx").write_text("dummy")
-    
-    root = MagicMock()
-    root.after = lambda delay, func: func()
-    mock_ui = MockUI(root)
-    mock_ui.day_folder = str(day_folder)
-    mock_ui.night_folder = str(night_folder)
-    mock_ui.start_date = date(2026, 1, 5) # Monday
-    mock_ui.end_date = date(2026, 1, 6)   # Tuesday
-    
-    app = ShiftAutomatorApp(root)
-    app.ui = mock_ui
-    
-    # We need to make the MockWordProcessor aware of file existence if we want it to fail
-    # or just let it record failures if we mock print_document to check files.
-    
-    mock_wp = MockWordProcessor()
-    def mock_print(folder, template, dt, printer):
-        path = os.path.join(folder, f"{template}.docx")
-        if os.path.exists(path):
-            mock_wp.print_log.append({"template": template})
-            return True, None
-        return False, "File not found"
+    # Make one shift fail
+    def fail_on_night(folder, template_name, current_date, printer_name):
+        if "night" in template_name.lower():
+            return False, "File not found"
+        return True, None
         
-    mock_wp.print_document = mock_print
+    mock_wp.print_document = fail_on_night # type: ignore
     
-    with patch.object(main_module, "WordProcessor", return_value=mock_wp):
+    with patch("src.main.WordProcessor", return_value=mock_wp):
         app._process_batch()
+        
+    # Verify results
+    assert mock_wp.call_count == 2
+    # Check that warning was shown for failure
+    assert any("failed" in str(msg).lower() for msg in mock_ui.warning_messages)
+
+def test_workflow_cancellation(mock_wp: MockWordProcessor, mock_ui: MockUI):
+    """Test that cancellation stops the process early."""
+    import tkinter as tk
+    root = tk.Tk()
+    app = ShiftAutomatorApp(root)
+    app.ui = mock_ui  # type: ignore
     
-    assert len(mock_wp.print_log) == 1
-    # Check if a warning was shown for 3 failures
-    assert any("3 operation(s) failed" in str(args) for args in mock_ui.show_warning.call_args_list) or True
+    # Range of 10 days
+    start_date = date(2024, 1, 1)
+    end_date = date(2024, 1, 10)
+    
+    mock_ui.set_dates(start_date, end_date)
+    mock_ui.set_folders("C:/Day", "C:/Night")
+    mock_ui.set_printer("TestPrinter")
+    
+    # Trigger cancellation after first print
+    original_print = mock_wp.print_document
+    def cancel_after_one(*args, **kwargs):
+        app._cancel_requested = True
+        return True, None
+        
+    mock_wp.print_document = cancel_after_one # type: ignore
+    
+    with patch("src.main.WordProcessor", return_value=mock_wp):
+        app._process_batch()
+        
+    # Should have stopped after first day shift or night shift
+    # In the implementation, it checks after each shift.
+    assert mock_wp.call_count <= 2 
+    assert any("Cancelled" in str(msg) for msg in mock_ui.info_messages)

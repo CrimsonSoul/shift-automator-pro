@@ -12,6 +12,7 @@ class MockWordProcessor:
         self.should_fail = False
         self.error_message = "Mock Error"
         self._thread_id = None
+        self.call_count = 0
 
     def initialize(self) -> None:
         self.initialized = True
@@ -22,6 +23,7 @@ class MockWordProcessor:
 
     def print_document(self, folder: str, template_name: str, current_date: date,
                        printer_name: str) -> Tuple[bool, Optional[str]]:
+        self.call_count += 1
         if not self.initialized:
             return False, "Not initialized"
         
@@ -52,6 +54,7 @@ class MockUI:
         self.progress_values: List[float] = []
         self.error_calls: List[Tuple[str, str]] = []
         self.info_calls: List[Tuple[str, str]] = []
+        self.warning_calls: List[Tuple[str, str]] = []
         
         self.day_folder = ""
         self.night_folder = ""
@@ -78,6 +81,18 @@ class MockUI:
         self.show_info = MagicMock(side_effect=self._record_info)
         self.update_status = MagicMock(side_effect=self._record_status)
 
+    @property
+    def status_history(self) -> List[str]:
+        return self.status_messages
+
+    @property
+    def info_messages(self) -> List[str]:
+        return [call[1] for call in self.info_calls]
+
+    @property
+    def warning_messages(self) -> List[str]:
+        return [call[1] for call in self.warning_calls]
+
     def _record_status(self, message: str, progress: Optional[float]) -> None:
         self.status_messages.append(message)
         if progress is not None:
@@ -87,6 +102,7 @@ class MockUI:
         self.error_calls.append((title, message))
 
     def _record_warning(self, title: str, message: str) -> None:
+        self.warning_calls.append((title, message))
         # Also record warnings to error_calls for easier checking in some tests
         self.error_calls.append((title, message))
 
@@ -98,6 +114,17 @@ class MockUI:
     def get_printer_name(self) -> str: return self.printer_name
     def get_start_date(self) -> date: return self.start_date
     def get_end_date(self) -> date: return self.end_date
+
+    def set_dates(self, start: date, end: date) -> None:
+        self.start_date = start
+        self.end_date = end
+
+    def set_folders(self, day: str, night: str) -> None:
+        self.day_folder = day
+        self.night_folder = night
+
+    def set_printer(self, printer: str) -> None:
+        self.printer_name = printer
 
     def set_start_command(self, cmd): self.start_command = cmd
     def set_cancel_command(self, cmd): self.cancel_command = cmd

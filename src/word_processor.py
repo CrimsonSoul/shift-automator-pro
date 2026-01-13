@@ -63,7 +63,7 @@ class WordProcessor:
         if self._initialized:
             return
 
-        if not HAS_PYWIN32:
+        if not HAS_PYWIN32 or pythoncom is None:
             raise RuntimeError(
                 "This application requires Windows with pywin32 installed. "
                 "Current platform: " + sys.platform
@@ -75,16 +75,19 @@ class WordProcessor:
             com_initialized = True
             self._thread_id = threading.get_ident()  # Record which thread initialized COM
             self.word_app = win32com.client.Dispatch("Word.Application")  # type: ignore
-            self.word_app.Visible = False
-            self.word_app.DisplayAlerts = 0
-            # Set macro security to disable macros for security
-            # wdSecurityPolicy = 4 (Disable all macros without notification)
-            self.word_app.AutomationSecurity = 4
-            self._initialized = True
-            logger.info(f"Word application initialized on thread {self._thread_id}")
+            if self.word_app:
+                self.word_app.Visible = False
+                self.word_app.DisplayAlerts = 0
+                # Set macro security to disable macros for security
+                # wdSecurityPolicy = 4 (Disable all macros without notification)
+                self.word_app.AutomationSecurity = 4
+                self._initialized = True
+                logger.info(f"Word application initialized on thread {self._thread_id}")
+            else:
+                raise RuntimeError("win32com.client.Dispatch returned None")
         except Exception as e:
             # Clean up COM if it was initialized but Word creation failed
-            if com_initialized:
+            if com_initialized and pythoncom:
                 try:
                     pythoncom.CoUninitialize()
                 except Exception as cleanup_error:
@@ -113,7 +116,8 @@ class WordProcessor:
         finally:
             self.word_app = None
             self._initialized = False
-            pythoncom.CoUninitialize()
+            if pythoncom:
+                pythoncom.CoUninitialize()
 
     def safe_com_call(self, func: Callable[..., Any], *args: Any,
                       retries: int = COM_RETRIES, delay: float = COM_RETRY_DELAY,
@@ -245,7 +249,7 @@ class WordProcessor:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self._initialized:
+        if not self._initialized or not self.word_app:
             return False, "Word processor not initialized"
 
         # Edge Case: Verify printer is ready/online (Windows only)
@@ -278,6 +282,9 @@ class WordProcessor:
                 self.word_app.Documents.Open,
                 target_file, False, False
             )
+
+            if not doc:
+                return False, f"Failed to open document: {target_file}"
 
             # Unprotect if necessary
             if doc.ProtectionType != PROTECTION_NONE:

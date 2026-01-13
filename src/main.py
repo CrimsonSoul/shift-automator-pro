@@ -100,13 +100,13 @@ class ShiftAutomatorApp:
         """Load configuration and apply to UI."""
         try:
             config = self.config_manager.load()
-            if config.day_folder:
+            if config.day_folder and self.ui.day_entry:
                 self.ui.day_entry.delete(0, tk.END)
                 self.ui.day_entry.insert(0, config.day_folder)
-            if config.night_folder:
+            if config.night_folder and self.ui.night_entry:
                 self.ui.night_entry.delete(0, tk.END)
                 self.ui.night_entry.insert(0, config.night_folder)
-            if config.printer_name:
+            if config.printer_name and self.ui.printer_var:
                 self.ui.printer_var.set(config.printer_name)
             logger.info("Configuration loaded successfully")
         except Exception as e:
@@ -220,7 +220,7 @@ class ShiftAutomatorApp:
         # Validate inputs
         is_valid, error_msg = self._validate_inputs()
         if not is_valid:
-            self.ui.show_warning("Validation Error", error_msg)
+            self.ui.show_warning("Validation Error", error_msg or "Unknown error")
             return
 
         # Reset cancellation flag
@@ -303,6 +303,11 @@ class ShiftAutomatorApp:
         day_folder = self.ui.get_day_folder()
         night_folder = self.ui.get_night_folder()
         printer_name = self.ui.get_printer_name()
+
+        # Check if dates are None (should be handled by validation, but for type safety)
+        if not start_date or not end_date:
+            logger.error("Start date or end date is None in _process_batch")
+            return
 
         # Cancel any pending config save and save immediately before processing
         with self._config_save_lock:
