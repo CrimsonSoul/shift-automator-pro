@@ -11,9 +11,12 @@ This package provides modules for:
 - Logging setup (logger)
 """
 
-from .main import ShiftAutomatorApp, main
+from .main import ShiftAutomatorApp, main as run_app
+from .ui import ScheduleAppUI
+from .word_processor import WordProcessor
+from .config import ConfigManager, AppConfig
 
 __version__ = "2.0.0"
 __author__ = "Shift Automator Team"
 
-__all__ = ["ShiftAutomatorApp", "main"]
+__all__ = ["ShiftAutomatorApp", "run_app", "ScheduleAppUI", "WordProcessor", "ConfigManager", "AppConfig"]
