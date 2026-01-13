@@ -84,16 +84,19 @@ CONFIG_DEBOUNCE_DELAY: Final = 1.0  # seconds - delay before saving config
 
 @dataclass(frozen=True)
 class Colors:
-    """Color scheme constants for the application UI."""
-    background: str = "#0D0D12"      # Near-black depth
-    surface: str = "#16161D"         # Modern card surface
-    accent: str = "#4D7CFF"          # Tech blue
-    text_main: str = "#FFFFFF"       # High contrast
-    text_dim: str = "#71717A"        # Muted secondary
-    success: str = "#10B981"         # Emerald
-    border: str = "#27272A"          # Subtle border
-    secondary: str = "#1E1E26"       # Button hover
-    accent_hover: str = "#3A6DFF"    # Accent hover state
+    """Color scheme constants for the application UI (Relay Design System)."""
+    background: str = "#0B0D12"      # Relay app background
+    surface: str = "#18181B"         # Relay surface/panel
+    surface_elevated: str = "#1E1E21" # Relay elevated surface
+    accent: str = "#3B82F6"          # Relay accent blue
+    text_main: str = "#FFFFFF"       # Relay primary text
+    text_dim: str = "#A1A1AA"        # Relay secondary text
+    text_tertiary: str = "#71717A"   # Relay tertiary text
+    success: str = "#10B981"         # Relay success green
+    error: str = "#FF5C5C"           # Relay danger
+    border: str = "#27272A"          # Relay border (approximate for solid)
+    secondary: str = "#27272A"       # Button hover / secondary action
+    accent_hover: str = "#60A5FA"    # Relay accent blue hover
 
 
 @dataclass(frozen=True)
