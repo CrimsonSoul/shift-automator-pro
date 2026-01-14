@@ -41,7 +41,11 @@ from .constants import (
     COM_ERROR_DISP_E_EXCEPTION,
     COM_ERROR_DISP_E_BADINDEX,
     PRINTER_STATUS_OFFLINE,
-    PRINTER_STATUS_ERROR
+    PRINTER_STATUS_ERROR,
+    COM_INIT_MAX_RETRIES_PER_METHOD,
+    COM_INIT_CACHE_CLEAR_DELAY,
+    COM_INIT_PROCESS_KILL_DELAY,
+    COM_INIT_STABILIZATION_DELAY,
 )
 
 from .logger import get_logger
@@ -108,43 +112,152 @@ class WordProcessor:
     def _try_dispatch(self) -> Any:
         """
         Attempt to connect to Word using various methods and recovery strategies.
-        
+
+        Strategy:
+        1. Pre-flight cleanup (kill Word, clear cache) to start with clean slate
+        2. Try each dispatch method with retry-after-cache-clear logic
+        3. Only move to next method after retries are exhausted
+
         Returns:
             The Word application object, or None if all attempts fail.
         """
-        # 1. Standard Dispatch
-        try:
-            return win32com.client.Dispatch("Word.Application")
-        except Exception as e:
-            logger.warning(f"Standard Word initialization failed: {e}")
-            if self._is_cache_error(e):
-                self._clear_com_cache()
-                self._kill_word_processes()
+        # Pre-flight cleanup: Start with a clean slate
+        self._perform_preflight_cleanup()
 
-        # 2. DispatchEx (Force new instance)
-        try:
-            logger.info("Attempting DispatchEx...")
-            app = win32com.client.DispatchEx("Word.Application")
-            # Stabilization delay
-            time.sleep(1.0)
-            return app
-        except Exception as e:
-            logger.warning(f"Forceful Word initialization (DispatchEx) failed: {e}")
-            if self._is_cache_error(e):
-                self._clear_com_cache()
-                self._kill_word_processes()
+        # Define dispatch strategies in order of preference
+        dispatch_strategies = [
+            ("Standard Dispatch", lambda: win32com.client.Dispatch("Word.Application")),
+            ("DispatchEx", lambda: win32com.client.DispatchEx("Word.Application")),
+            ("Dynamic Dispatch", lambda: win32com.client.dynamic.Dispatch("Word.Application")),
+        ]
 
-        # 3. Dynamic Dispatch (Bypasses the static gen_py cache)
-        try:
-            logger.info("Attempting dynamic Dispatch...")
-            app = win32com.client.dynamic.Dispatch("Word.Application")
-            # Stabilization delay
-            time.sleep(1.0)
-            return app
-        except Exception as e:
-            logger.error(f"Dynamic Word initialization failed: {e}")
+        for strategy_name, dispatch_func in dispatch_strategies:
+            app = self._try_dispatch_with_retry(strategy_name, dispatch_func)
+            if app is not None:
+                return app
+
+        logger.error("All dispatch strategies exhausted. Could not connect to Word.")
+        return None
+
+    def _perform_preflight_cleanup(self) -> None:
+        """
+        Perform pre-flight cleanup to ensure a clean slate before dispatch attempts.
+
+        This proactively clears potential issues rather than waiting for failures.
+        """
+        logger.info("Performing pre-flight cleanup for Word COM initialization...")
+
+        # Kill any existing Word processes that might hold locks
+        self._kill_word_processes()
+
+        # Clear potentially corrupted COM cache
+        self._clear_com_cache()
+
+        # Wait for Windows to release file locks and resources
+        time.sleep(COM_INIT_CACHE_CLEAR_DELAY)
+
+        logger.info("Pre-flight cleanup completed.")
+
+    def _try_dispatch_with_retry(self, strategy_name: str, dispatch_func: Callable[[], Any]) -> Optional[Any]:
+        """
+        Try a dispatch method with retry logic for cache errors.
+
+        Args:
+            strategy_name: Human-readable name for logging
+            dispatch_func: The dispatch function to call
+
+        Returns:
+            Word application object if successful, None otherwise
+        """
+        max_attempts = COM_INIT_MAX_RETRIES_PER_METHOD
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"Attempting {strategy_name} ({attempt}/{max_attempts})...")
+                app = dispatch_func()
+
+                # Stabilization delay - let COM settle
+                time.sleep(COM_INIT_STABILIZATION_DELAY)
+
+                # Verify the connection is actually working
+                if self._verify_word_connection(app):
+                    logger.info(f"{strategy_name} succeeded on attempt {attempt}.")
+                    return app
+                else:
+                    logger.warning(f"{strategy_name} returned app but verification failed.")
+                    self._safe_quit_app(app)
+
+            except Exception as e:
+                logger.warning(f"{strategy_name} attempt {attempt} failed: {e}")
+
+                if self._is_cache_error(e):
+                    if attempt < max_attempts:
+                        logger.info("Cache error detected. Performing recovery before retry...")
+                        self._perform_cache_recovery()
+                    else:
+                        logger.warning(f"Cache error on final attempt for {strategy_name}.")
+                else:
+                    # Non-cache error - don't retry this method, move to next
+                    logger.warning("Non-cache error encountered. Moving to next strategy.")
+                    break
 
         return None
+
+    def _perform_cache_recovery(self) -> None:
+        """
+        Perform cache recovery after a cache-related error.
+
+        This is called between retry attempts when a cache error is detected.
+        """
+        logger.info("Performing cache recovery...")
+
+        # Kill Word processes first (they may hold locks on cache files)
+        self._kill_word_processes()
+        time.sleep(COM_INIT_PROCESS_KILL_DELAY)
+
+        # Clear the corrupted cache
+        self._clear_com_cache()
+        time.sleep(COM_INIT_CACHE_CLEAR_DELAY)
+
+        logger.info("Cache recovery completed.")
+
+    def _verify_word_connection(self, app: Any) -> bool:
+        """
+        Verify that the Word connection is actually working.
+
+        This catches cases where Dispatch returns an object but COM is broken.
+
+        Args:
+            app: The Word application object to verify
+
+        Returns:
+            True if the connection is valid, False otherwise
+        """
+        if app is None:
+            return False
+
+        try:
+            # Try to access a simple property - this will fail if COM is broken
+            _ = app.Name
+            return True
+        except Exception as e:
+            logger.warning(f"Word connection verification failed: {e}")
+            return False
+
+    def _safe_quit_app(self, app: Any) -> None:
+        """
+        Safely quit a Word application instance without raising exceptions.
+
+        Args:
+            app: The Word application object to quit
+        """
+        if app is None:
+            return
+
+        try:
+            app.Quit()
+        except Exception as e:
+            logger.debug(f"Error quitting Word app during cleanup: {e}")
 
     def _is_cache_error(self, e: Exception) -> bool:
         """Check if the error might be caused by a corrupted COM cache or zombie process."""

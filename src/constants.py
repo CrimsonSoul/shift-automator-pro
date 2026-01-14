@@ -55,6 +55,12 @@ COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
 COM_TIMEOUT: Final = 30  # seconds - timeout for COM operations
 
+# COM Initialization Settings
+COM_INIT_MAX_RETRIES_PER_METHOD: Final = 2  # Max retries per dispatch method after cache clear
+COM_INIT_CACHE_CLEAR_DELAY: Final = 2.0     # Seconds to wait after clearing cache
+COM_INIT_PROCESS_KILL_DELAY: Final = 2.0    # Seconds to wait after killing Word processes
+COM_INIT_STABILIZATION_DELAY: Final = 1.0   # Seconds to wait after successful dispatch
+
 # COM Error Codes (hexadecimal)
 COM_ERROR_RPC_CALL_REJECTED: Final = "0x80010001"  # RPC_E_CALL_REJECTED
 COM_ERROR_RPC_SERVERCALL_RETRYLATER: Final = "0x80010101"  # RPC_E_SERVERCALL_RETRYLATER
