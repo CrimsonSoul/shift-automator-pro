@@ -30,7 +30,10 @@ class TestWordProcessor:
     def test_initialize_success(self, mock_win32, mock_pythoncom):
         """Test successful Word application initialization."""
         mock_word_app = MagicMock()
+        # Mock all possible dispatch methods to return the same mock app
         mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.DispatchEx.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         processor = WordProcessor()
         processor.initialize()
@@ -53,21 +56,21 @@ class TestWordProcessor:
     def test_initialize_already_initialized(self, mock_win32, mock_pythoncom):
         """Test that initialize is idempotent."""
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         processor = WordProcessor()
         processor.initialize()
         processor.initialize()  # Should not re-initialize
 
-        # Should only call Dispatch once
-        assert mock_win32.Dispatch.call_count == 1
+        # Should only call Dispatch once (via Dynamic Dispatch in current implementation)
+        assert mock_win32.dynamic.Dispatch.call_count == 1
 
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
     def test_shutdown(self, mock_win32, mock_pythoncom):
         """Test Word application shutdown."""
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         processor = WordProcessor()
         processor.initialize()
@@ -208,7 +211,7 @@ class TestWordProcessor:
              patch('src.word_processor.win32com.client') as mock_win32:
 
             mock_word_app = MagicMock()
-            mock_win32.Dispatch.return_value = mock_word_app
+            mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
             with WordProcessor() as processor:
                 assert processor._initialized is True
@@ -252,7 +255,7 @@ class TestWordProcessor:
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         # Create test template
         template_folder = tmp_path / "templates"
@@ -289,7 +292,7 @@ class TestWordProcessor:
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         processor = WordProcessor()
         processor.initialize()
@@ -302,6 +305,7 @@ class TestWordProcessor:
         )
 
         assert success is False
+        assert error is not None
         assert "not found" in error.lower()
 
     @patch('src.word_processor.pythoncom')
@@ -313,7 +317,7 @@ class TestWordProcessor:
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         # Create test template
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -351,7 +355,7 @@ class TestWordProcessorIntegration:
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
         mock_word_app = MagicMock()
-        mock_win32.Dispatch.return_value = mock_word_app
+        mock_win32.dynamic.Dispatch.return_value = mock_word_app
 
         # Create test templates
         template_folder = tmp_path / "templates"

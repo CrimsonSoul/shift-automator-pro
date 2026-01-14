@@ -62,7 +62,7 @@ class TestScheduleAppUI:
         # Check geometry
         geometry = str(root.geometry())
         assert "640" in geometry
-        assert "720" in geometry
+        assert "880" in geometry
 
     def test_get_day_folder(self, root):
         """Test getting day folder path."""

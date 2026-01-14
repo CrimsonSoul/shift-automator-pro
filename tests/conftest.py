@@ -13,6 +13,7 @@ if sys.platform != "win32":
     sys.modules["pythoncom"] = MockModule()
     sys.modules["win32com"] = MockModule()
     sys.modules["win32com.client"] = MockModule()
+    sys.modules["win32com.client.dynamic"] = MockModule()
 
 # Force mock tkinter to avoid display issues in CI/headless
 # We create a fake class for Tk so isinstance works if needed
