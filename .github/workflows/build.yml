@@ -39,7 +39,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --name="Shift Automator Pro" --collect-all tkcalendar --hidden-import babel.numbers main.py
+          pyinstaller main.spec
 
       - name: Create release directory
         run: |
