@@ -217,9 +217,12 @@ class ShiftAutomatorApp:
 
     def start_processing(self) -> None:
         """Start the batch processing in a background thread."""
+        self.ui.log("Validating configuration...")
+        
         # Validate inputs
         is_valid, error_msg = self._validate_inputs()
         if not is_valid:
+            self.ui.log(f"Validation failed: {error_msg}")
             self.ui.show_warning("Validation Error", error_msg or "Unknown error")
             return
 
@@ -229,6 +232,7 @@ class ShiftAutomatorApp:
         # Update UI for processing state
         self.ui.set_print_button_state("disabled")
         self.ui.set_cancel_button_state("normal")
+        self.ui.log("Starting background process...")
 
         # Start processing thread
         self._processing_thread = threading.Thread(
@@ -242,7 +246,7 @@ class ShiftAutomatorApp:
         if self._processing_thread and self._processing_thread.is_alive():
             with self._cancel_lock:
                 self._cancel_requested = True
-            self.ui.update_status("Cancellation requested, finishing current document...", None)
+            self.ui.log("Cancellation requested, finishing current document...")
             self.ui.set_cancel_button_state("disabled")
             logger.info("User requested cancellation of batch processing")
 
@@ -338,7 +342,9 @@ class ShiftAutomatorApp:
         processed_days = 0
         progress = 0.0  # Initialize progress for early cancellation case
         try:
+            self.root.after(0, lambda: self.ui.log("Initializing Word Processor (this may take a moment)..."))
             with WordProcessor() as word_proc:
+                self.root.after(0, lambda: self.ui.log("Word connection established."))
                 for i in range(total_days):
                     # Check for cancellation request before processing this day
                     with self._cancel_lock:
@@ -355,7 +361,7 @@ class ShiftAutomatorApp:
                     # Update progress
                     progress = (i / total_days) * 100
                     self.root.after(0, lambda m=f"Processing {day_name} {display_date}...",
-                                   p=progress: self.ui.update_status(m, p))
+                                   p=progress: (self.ui.log(m), self.ui.update_progress(p)))
 
                     # Process Day Shift
                     day_template = get_shift_template_name(current_date, "day")
@@ -369,7 +375,10 @@ class ShiftAutomatorApp:
                             'template': day_template,
                             'error': error
                         })
+                        self.root.after(0, lambda e=error: self.ui.log(f"Error printing day shift: {e}"))
                         logger.error(f"Failed to print day shift for {current_date}: {error}")
+                    else:
+                        self.root.after(0, lambda: self.ui.log(f"Sent {day_name} Day Shift to printer."))
 
                     # Check for cancellation request before night shift
                     with self._cancel_lock:
@@ -391,17 +400,20 @@ class ShiftAutomatorApp:
                             'template': night_template,
                             'error': error
                         })
+                        self.root.after(0, lambda e=error: self.ui.log(f"Error printing night shift: {e}"))
                         logger.error(f"Failed to print night shift for {current_date}: {error}")
+                    else:
+                        self.root.after(0, lambda: self.ui.log(f"Sent {day_name} Night Shift to printer."))
 
                 # Show completion status
                 if cancelled:
-                    self.root.after(0, lambda: self.ui.update_status("Cancelled", progress))
+                    self.root.after(0, lambda: self.ui.log("Processing CANCELLED by user."))
                     self.root.after(0, lambda pd=processed_days, td=total_days: self.ui.show_info(
                         "Processing Cancelled",
                         f"Cancelled by user.\n\nProcessed {pd} of {td} days before cancellation."
                     ))
                 else:
-                    self.root.after(0, lambda: self.ui.update_status("Complete!", PROGRESS_MAX))
+                    self.root.after(0, lambda: (self.ui.log("Processing COMPLETE!"), self.ui.update_progress(PROGRESS_MAX)))
 
                     # Show results
                     if failed_operations:
@@ -414,6 +426,7 @@ class ShiftAutomatorApp:
 
         except Exception as e:
             logger.exception("Error during batch processing")
+            self.root.after(0, lambda: self.ui.log(f"FATAL ERROR: {str(e)}"))
             self.root.after(0, lambda: self.ui.show_error(
                 "Processing Error",
                 f"An error occurred during processing: {str(e)}"

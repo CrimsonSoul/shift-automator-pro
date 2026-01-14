@@ -7,7 +7,7 @@ This module contains all Tkinter UI components and styling.
 import os
 import tkinter as tk
 from datetime import date
-from tkinter import messagebox, filedialog, ttk
+from tkinter import messagebox, filedialog, ttk, scrolledtext
 from tkcalendar import DateEntry
 from typing import Optional, Callable, List, Any, Union
 
@@ -63,7 +63,7 @@ class ScheduleAppUI:
         self.end_date_picker: Optional[DateEntry] = None
         self.printer_var: Optional[tk.StringVar] = None
         self.printer_dropdown: Optional[ttk.Combobox] = None
-        self.status_label: Optional[ttk.Label] = None
+        self.log_widget: Optional[scrolledtext.ScrolledText] = None
         self.progress_var: Optional[tk.DoubleVar] = None
         self.progress: Optional[ttk.Progressbar] = None
         self.print_btn: Optional[tk.Button] = None
@@ -269,17 +269,26 @@ class ScheduleAppUI:
         footer = ttk.Frame(parent)
         footer.pack(fill="x", side="bottom")
 
-        # Status Label
-        status_wrap = ttk.Frame(footer)
-        status_wrap.pack(fill="x", pady=(0, 12))
-        self.status_label = ttk.Label(status_wrap, text="System Ready", style="Sub.TLabel")
-        self.status_label.pack(side="left")
+        # Log Section
+        log_wrap = ttk.Frame(footer)
+        log_wrap.pack(fill="x", pady=(0, 12))
+        ttk.Label(log_wrap, text="ACTIVITY LOG", style="Sub.TLabel").pack(anchor="w", pady=(0, 4))
+        
+        self.log_widget = scrolledtext.ScrolledText(
+            log_wrap, height=6, font=("Consolas", 9),
+            bg=COLORS.surface_elevated, fg=COLORS.text_dim,
+            insertbackground=COLORS.text_main, borderwidth=0,
+            highlightthickness=1, highlightbackground=COLORS.border,
+            padx=10, pady=10
+        )
+        self.log_widget.pack(fill="x")
+        self.log_widget.config(state="disabled")
 
         # Progress Bar
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(footer, variable=self.progress_var,
                                        maximum=PROGRESS_MAX, style="Horizontal.TProgressbar")
-        self.progress.pack(fill="x", pady=(0, 24))
+        self.progress.pack(fill="x", pady=(12, 24))
 
         # Button Row
         button_row = ttk.Frame(footer)
@@ -431,18 +440,28 @@ class ScheduleAppUI:
         if self.cancel_btn:
             self.cancel_btn.config(state=state)
 
-    def update_status(self, message: str, progress: Optional[float]) -> None:
+    def update_progress(self, progress: float) -> None:
         """
-        Update the status label and progress bar.
+        Update the progress bar.
 
         Args:
-            message: Status message to display
-            progress: Progress value (0-100), or None to keep current value
+            progress: Progress value (0-100)
         """
-        if self.status_label:
-            self.status_label.config(text=message)
-        if self.progress_var and progress is not None:
+        if self.progress_var is not None:
             self.progress_var.set(progress)
+
+    def log(self, message: str) -> None:
+        """
+        Append a message to the log widget.
+
+        Args:
+            message: Message to log
+        """
+        if self.log_widget:
+            self.log_widget.config(state="normal")
+            self.log_widget.insert(tk.END, f"[{date.today().strftime('%H:%M:%S')}] {message}\n")
+            self.log_widget.see(tk.END)
+            self.log_widget.config(state="disabled")
 
     def show_error(self, title: str, message: str) -> None:
         """Show an error message box."""

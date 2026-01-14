@@ -74,7 +74,19 @@ class WordProcessor:
             pythoncom.CoInitialize()  # type: ignore
             com_initialized = True
             self._thread_id = threading.get_ident()  # Record which thread initialized COM
-            self.word_app = win32com.client.Dispatch("Word.Application")  # type: ignore
+            
+            # Primary attempt using standard Dispatch
+            try:
+                self.word_app = win32com.client.Dispatch("Word.Application")
+            except Exception as e:
+                logger.warning(f"Standard Word initialization failed: {e}. Trying DispatchEx...")
+                # Fallback to DispatchEx which forces a new instance
+                try:
+                    self.word_app = win32com.client.DispatchEx("Word.Application")
+                except Exception as ex_e:
+                    logger.error(f"Forceful Word initialization (DispatchEx) also failed: {ex_e}")
+                    raise RuntimeError(f"Could not connect to Word. Please ensure Office is installed correctly. Error: {ex_e}")
+
             if self.word_app:
                 self.word_app.Visible = False
                 self.word_app.DisplayAlerts = 0
