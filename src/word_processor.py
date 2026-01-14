@@ -724,6 +724,10 @@ class WordProcessor:
                 if f.lower() == expected_filename.lower():
                     target_file = os.path.join(folder, f)
                     
+                    # Normalize path to ensure standard Windows separators (backslashes)
+                    # Microsoft Word COM often fails with forward slashes or mixed paths
+                    target_file = os.path.abspath(target_file)
+                    
                     # Edge Case: Check for empty files
                     try:
                         if os.path.getsize(target_file) == 0:
