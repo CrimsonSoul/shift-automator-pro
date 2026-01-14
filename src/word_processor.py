@@ -17,13 +17,16 @@ from typing import Optional, Any, Tuple, Callable
 try:
     import pythoncom
     import win32com.client
+    import win32com.client.dynamic
     import win32print
+    import shutil
     HAS_PYWIN32 = True
 except ImportError:
     HAS_PYWIN32 = False
     pythoncom = None  # type: ignore
     win32com = None  # type: ignore
     win32print = None # type: ignore
+    shutil = None     # type: ignore
 
 from .constants import (
     DOCX_EXTENSION,
@@ -34,9 +37,11 @@ from .constants import (
     DATE_PLACEHOLDER,
     COM_ERROR_RPC_CALL_REJECTED,
     COM_ERROR_RPC_SERVERCALL_RETRYLATER,
+    COM_ERROR_DISP_E_EXCEPTION,
     PRINTER_STATUS_OFFLINE,
     PRINTER_STATUS_ERROR
 )
+
 from .logger import get_logger
 from .path_validation import validate_folder_path
 
@@ -76,16 +81,7 @@ class WordProcessor:
             self._thread_id = threading.get_ident()  # Record which thread initialized COM
             
             # Primary attempt using standard Dispatch
-            try:
-                self.word_app = win32com.client.Dispatch("Word.Application")
-            except Exception as e:
-                logger.warning(f"Standard Word initialization failed: {e}. Trying DispatchEx...")
-                # Fallback to DispatchEx which forces a new instance
-                try:
-                    self.word_app = win32com.client.DispatchEx("Word.Application")
-                except Exception as ex_e:
-                    logger.error(f"Forceful Word initialization (DispatchEx) also failed: {ex_e}")
-                    raise RuntimeError(f"Could not connect to Word. Please ensure Office is installed correctly. Error: {ex_e}")
+            self.word_app = self._try_dispatch()
 
             if self.word_app:
                 self.word_app.Visible = False
@@ -96,7 +92,7 @@ class WordProcessor:
                 self._initialized = True
                 logger.info(f"Word application initialized on thread {self._thread_id}")
             else:
-                raise RuntimeError("win32com.client.Dispatch returned None")
+                raise RuntimeError("Could not connect to Word after multiple attempts.")
         except Exception as e:
             # Clean up COM if it was initialized but Word creation failed
             if com_initialized and pythoncom:
@@ -106,6 +102,67 @@ class WordProcessor:
                     logger.warning(f"Error during COM cleanup after failed initialization: {cleanup_error}")
             logger.error(f"Failed to initialize Word application: {e}")
             raise RuntimeError(f"Could not initialize Word: {e}") from e
+
+    def _try_dispatch(self) -> Any:
+        """
+        Attempt to connect to Word using various methods and recovery strategies.
+        
+        Returns:
+            The Word application object, or None if all attempts fail.
+        """
+        # 1. Standard Dispatch
+        try:
+            return win32com.client.Dispatch("Word.Application")
+        except Exception as e:
+            logger.warning(f"Standard Word initialization failed: {e}")
+            if self._is_cache_error(e):
+                self._clear_com_cache()
+
+        # 2. DispatchEx (Force new instance)
+        try:
+            logger.info("Attempting DispatchEx...")
+            return win32com.client.DispatchEx("Word.Application")
+        except Exception as e:
+            logger.warning(f"Forceful Word initialization (DispatchEx) failed: {e}")
+            if self._is_cache_error(e):
+                self._clear_com_cache()
+
+        # 3. Dynamic Dispatch (Bypasses the static gen_py cache)
+        try:
+            logger.info("Attempting dynamic Dispatch...")
+            return win32com.client.dynamic.Dispatch("Word.Application")
+        except Exception as e:
+            logger.error(f"Dynamic Word initialization failed: {e}")
+
+        return None
+
+    def _is_cache_error(self, e: Exception) -> bool:
+        """Check if the error might be caused by a corrupted COM cache."""
+        error_str = str(e).lower()
+        return (COM_ERROR_DISP_E_EXCEPTION.lower() in error_str or 
+                "-2147352567" in error_str)
+
+    def _clear_com_cache(self) -> None:
+        """Clear the win32com gen_py cache to resolve corruption issues."""
+        try:
+            # Get the path to gen_py
+            # In most pywin32 installations, it's in the temp directory
+            import tempfile
+            gen_py_path = os.path.join(tempfile.gettempdir(), "gen_py")
+            
+            if os.path.exists(gen_py_path):
+                logger.info(f"Clearing corrupted COM cache at {gen_py_path}")
+                shutil.rmtree(gen_py_path)
+            
+            # Also try win32com.__gen_path__ if available
+            import win32com
+            if hasattr(win32com, "__gen_path__"):
+                alt_path = win32com.__gen_path__
+                if os.path.exists(alt_path) and alt_path != gen_py_path:
+                    logger.info(f"Clearing alternate COM cache at {alt_path}")
+                    shutil.rmtree(alt_path)
+        except Exception as e:
+            logger.warning(f"Failed to clear COM cache: {e}")
 
     def shutdown(self) -> None:
         """Shutdown the Word application instance."""
