@@ -3,7 +3,20 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = []
+hiddenimports = [
+    # pywin32 COM automation - required for Word integration
+    'win32com.client',
+    'win32com.client.gencache',
+    'win32com.client.dynamic',
+    'win32com.server',
+    'win32com.shell',
+    'pythoncom',
+    'pywintypes',
+    'win32api',
+    'win32print',
+    'win32event',
+    'win32process',
+]
 
 # Collect all data for babel (fixes the "numbers" error)
 tmp_ret = collect_all('babel')
@@ -11,6 +24,10 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # Collect all data for tkcalendar (fixes potential missing calendar assets)
 tmp_ret = collect_all('tkcalendar')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
+# Collect pywin32 system files (DLLs, etc.)
+tmp_ret = collect_all('win32com')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 block_cipher = None

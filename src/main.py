@@ -4,6 +4,7 @@ Shift Automator - Main Application Entry Point
 A high-performance desktop application for automating shift schedule printing.
 """
 
+import sys
 import threading
 import time
 from datetime import date, timedelta
@@ -24,7 +25,7 @@ from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
 from .scheduler import get_shift_template_name, validate_date_range
 from .ui import ScheduleAppUI
-from .word_processor import WordProcessor
+from .word_processor import WordProcessor, HAS_PYWIN32
 
 # Set up logging
 setup_logging()
@@ -465,6 +466,25 @@ class ShiftAutomatorApp:
 def main() -> None:
     """Main entry point for the application."""
     logger.info("Starting Shift Automator")
+
+    # Early check for pywin32 availability (Windows-only)
+    if sys.platform == "win32" and not HAS_PYWIN32:
+        error_msg = (
+            "This application requires pywin32 to be installed.\n\n"
+            "The pywin32 package is missing or could not be loaded.\n"
+            "Please reinstall the application or contact support."
+        )
+        logger.error(f"pywin32 not available: HAS_PYWIN32={HAS_PYWIN32}")
+        try:
+            import tkinter.messagebox as mb
+            # Need a root window for messagebox
+            temp_root = tk.Tk()
+            temp_root.withdraw()
+            mb.showerror("Missing Dependency", error_msg)
+            temp_root.destroy()
+        except Exception:
+            print(f"FATAL: {error_msg}")
+        return
 
     try:
         root = tk.Tk()

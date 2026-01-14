@@ -115,8 +115,22 @@ class WordProcessor:
                 except Exception as cleanup_error:
                     logger.warning(f"Error during COM cleanup after failed initialization: {cleanup_error}")
             
+            # Extract detailed COM error information if available
             error_details = f"{type(e).__name__}: {str(e)}"
+            
+            # Try to get COM-specific error codes for better diagnostics
+            try:
+                if hasattr(e, 'hresult'):
+                    error_details += f" (HRESULT: 0x{e.hresult & 0xFFFFFFFF:08X})"
+                if hasattr(e, 'strerror'):
+                    error_details += f" (strerror: {e.strerror})"
+                if hasattr(e, 'excepinfo') and e.excepinfo:
+                    error_details += f" (excepinfo: {e.excepinfo})"
+            except Exception:
+                pass  # Don't fail while trying to get error details
+            
             logger.error(f"Failed to initialize Word application: {error_details}")
+            logger.exception("Full traceback for Word initialization failure:")
             raise RuntimeError(f"Could not initialize Word: {error_details}") from e
 
     def _try_dispatch(self) -> Any:
