@@ -19,13 +19,11 @@ def create_word_mocks(mock_win32_client, mock_word_app):
     """
     Helper to configure all dispatch methods to return the same mock Word app.
     
-    This accounts for the multi-strategy dispatch approach where GetObject is tried first,
-    then dynamic.Dispatch, DispatchEx, and standard Dispatch.
+    This accounts for the multi-strategy dispatch approach where Dynamic Dispatch is tried first,
+    then GetObject, DispatchEx, and standard Dispatch.
     """
-    # Mock GetObject (tried first) - needs to return the app
+    # Mock all dispatch methods to return the same app
     mock_win32_client.GetObject.return_value = mock_word_app
-    
-    # Mock all other dispatch methods to return the same app (as fallbacks)
     mock_win32_client.Dispatch.return_value = mock_word_app
     mock_win32_client.DispatchEx.return_value = mock_word_app
     mock_win32_client.dynamic.Dispatch.return_value = mock_word_app
@@ -85,8 +83,8 @@ class TestWordProcessor:
             processor.initialize()
             processor.initialize()  # Should not re-initialize
 
-            # GetObject is called once during first initialization (second call is skipped)
-            assert mock_win32.GetObject.call_count == 1
+            # Dynamic Dispatch is called once during first initialization (second call is skipped)
+            assert mock_win32.dynamic.Dispatch.call_count == 1
 
     @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
