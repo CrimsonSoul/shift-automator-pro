@@ -102,11 +102,15 @@ class WordProcessor:
             self.word_app = self._try_dispatch()
 
             if self.word_app:
-                self.word_app.Visible = False
-                self.word_app.DisplayAlerts = 0
-                # Set macro security to disable macros for security
-                # wdSecurityPolicy = 4 (Disable all macros without notification)
-                self.word_app.AutomationSecurity = 4
+                try:
+                    self.word_app.Visible = False
+                    self.word_app.DisplayAlerts = 0
+                    # Set macro security to disable macros for security
+                    # wdSecurityPolicy = 4 (Disable all macros without notification)
+                    self.word_app.AutomationSecurity = 4
+                except Exception as config_error:
+                    logger.warning(f"Failed to set Word application preferences: {config_error}")
+                
                 self._initialized = True
                 logger.info(f"Word application initialized on thread {self._thread_id}")
             else:
@@ -159,8 +163,8 @@ class WordProcessor:
         # Strategy 4: DispatchEx (creates new instance in separate process)
         # Strategy 5: Standard Dispatch (fallback)
         dispatch_strategies = [
-            ("GetObject", self._dispatch_via_getobject),
             ("Dynamic Dispatch", lambda: win32com.client.dynamic.Dispatch("Word.Application")),
+            ("GetObject", self._dispatch_via_getobject),
             ("DispatchEx", lambda: win32com.client.DispatchEx("Word.Application")),
             ("Standard Dispatch", lambda: win32com.client.Dispatch("Word.Application")),
             ("Subprocess Launch", self._dispatch_via_subprocess),
