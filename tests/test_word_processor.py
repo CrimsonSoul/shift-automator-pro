@@ -296,7 +296,8 @@ class TestWordProcessor:
         mock_doc = MagicMock()
         mock_doc.ProtectionType = -1  # PROTECTION_NONE
         mock_doc.PrintOut = MagicMock()  # Make PrintOut accept any args
-        mock_word_app.Documents.Open.return_value = mock_doc
+        # Mock Documents.Add (was Open)
+        mock_word_app.Documents.Add.return_value = mock_doc
 
         with patch.object(WordProcessor, '_perform_preflight_cleanup'):
             processor = WordProcessor()
@@ -311,7 +312,11 @@ class TestWordProcessor:
 
             assert success is True
             assert error is None
-            mock_word_app.Documents.Open.assert_called_once()
+            # Verify Add was called with Template arg
+            mock_word_app.Documents.Add.assert_called_once()
+            call_args = mock_word_app.Documents.Add.call_args
+            assert "Template" in call_args.kwargs or len(call_args.args) > 0
+            
             mock_doc.PrintOut.assert_called_once()
             mock_doc.Close.assert_called_once()
 
@@ -364,7 +369,7 @@ class TestWordProcessor:
             mock_doc = MagicMock()
             mock_doc.ProtectionType = 1  # Protected
             mock_doc.PrintOut = MagicMock()  # Accept any args
-            mock_word_app.Documents.Open.return_value = mock_doc
+            mock_word_app.Documents.Add.return_value = mock_doc
 
             with patch.object(WordProcessor, '_perform_preflight_cleanup'):
                 processor = WordProcessor()
@@ -406,7 +411,7 @@ class TestWordProcessorIntegration:
         mock_doc = MagicMock()
         mock_doc.ProtectionType = -1
         mock_doc.PrintOut = MagicMock()  # Accept any args
-        mock_word_app.Documents.Open.return_value = mock_doc
+        mock_word_app.Documents.Add.return_value = mock_doc
 
         with patch.object(WordProcessor, '_perform_preflight_cleanup'):
             processor = WordProcessor()

@@ -191,7 +191,7 @@ class WordProcessor:
         This bypasses COM activation issues by starting Word directly.
         """
         logger.info("Attempting subprocess launch strategy...")
-        
+
         # Try to find winword.exe
         word_paths = [
             os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
@@ -200,35 +200,65 @@ class WordProcessor:
             os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
             os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office 15", "root", "Office15", "WINWORD.EXE"),
         ]
-        
+
         word_exe = None
         for path in word_paths:
             if os.path.exists(path):
                 word_exe = path
                 break
-        
+
         if not word_exe:
             # Try via PATH
             word_exe = "WINWORD.EXE"
-        
+
+        process = None
         try:
-            # Launch Word with /automation flag (suppresses startup dialogs)
+            # Launch Word with optimized flags:
+            # /automation - suppresses startup dialogs and AutoRun macros
+            # /q - quiet mode (no splash screen)
+            # /n - start a new instance without loading a default document
             logger.info(f"Launching Word: {word_exe}")
-            subprocess.Popen(
-                [word_exe, "/automation"],
+            process = subprocess.Popen(
+                [word_exe, "/automation", "/q", "/n"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
-            
-            # Wait for Word to start
-            time.sleep(3.0)
-            
-            # Now try to connect to it
-            return win32com.client.GetObject(Class="Word.Application")
-            
+
+            # Smart wait loop - try to connect every second for up to 10 seconds
+            # This is faster on fast PCs and more reliable on slower ones
+            max_wait_seconds = 10
+            for attempt in range(max_wait_seconds):
+                try:
+                    time.sleep(1.0)
+                    app = win32com.client.GetObject(Class="Word.Application")
+                    logger.info(f"Connected to Word on attempt {attempt + 1}")
+                    return app
+                except Exception as e:
+                    if attempt < max_wait_seconds - 1:
+                        logger.debug(f"Word not ready yet, attempt {attempt + 1}/{max_wait_seconds}")
+                        continue
+                    else:
+                        raise RuntimeError(f"Failed to connect to Word after {max_wait_seconds} seconds") from e
+
         except Exception as e:
             logger.warning(f"Subprocess launch failed: {e}")
+            # CRITICAL FIX: Kill the process if we failed to connect to prevent zombie processes
+            if process is not None:
+                try:
+                    logger.info("Cleaning up failed subprocess Word instance...")
+                    process.terminate()
+                    # Give it a moment to close gracefully
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    # If terminate didn't work, kill it
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up subprocess: {cleanup_error}")
+
             # Fall back to regular dispatch
             return win32com.client.dynamic.Dispatch("Word.Application")
 
@@ -413,16 +443,37 @@ class WordProcessor:
         """Forcefully terminate any existing Word processes to ensure a clean slate."""
         if sys.platform != "win32":
             return
-            
+
         try:
             logger.info("Performing Clean Slate: Terminating existing Word processes...")
+            # First try to query running WINWORD processes to see if any exist
+            try:
+                result = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq WINWORD.EXE", "/FO", "CSV"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                processes = [line.strip() for line in result.stdout.split('\n') if 'WINWORD.EXE' in line]
+                if processes:
+                    logger.info(f"Found {len(processes)} Word process(es) running: {processes}")
+                else:
+                    logger.info("No Word processes found running")
+            except Exception as query_error:
+                logger.debug(f"Could not query Word processes: {query_error}")
+
             # Use taskkill to forcefully (/F) terminate all processes named WINWORD.EXE
             # redirecting output to NULL to keep logs clean unless there is an error
-            subprocess.call(
+            result = subprocess.call(
                 ["taskkill", "/F", "/IM", "WINWORD.EXE", "/T"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
+            if result == 0:
+                logger.info("Successfully terminated existing Word processes")
+            else:
+                logger.info(f"taskkill exited with code {result} (may be no processes to kill)")
+
             # Give Windows a moment to actually release the resources
             time.sleep(2.0)
         except Exception as e:
@@ -432,21 +483,21 @@ class WordProcessor:
         """Clear the win32com gen_py cache to resolve corruption issues."""
         if not HAS_PYWIN32:
             return
-            
+
         try:
             import tempfile
-            
+
             # List of potential gen_py cache locations
             cache_paths = []
-            
+
             # 1. Standard temp directory location
             cache_paths.append(os.path.join(tempfile.gettempdir(), "gen_py"))
-            
+
             # 2. User's local app data (common on newer Windows/pywin32)
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if local_app_data:
                 cache_paths.append(os.path.join(local_app_data, "Temp", "gen_py"))
-            
+
             # 3. Try win32com's reported path
             try:
                 import win32com
@@ -461,12 +512,12 @@ class WordProcessor:
                     pass
             except Exception:
                 pass
-            
+
             # 4. Try user profile temp
             user_profile = os.environ.get("USERPROFILE", "")
             if user_profile:
                 cache_paths.append(os.path.join(user_profile, "AppData", "Local", "Temp", "gen_py"))
-            
+
             # Remove duplicates while preserving order
             seen = set()
             unique_paths = []
@@ -474,16 +525,24 @@ class WordProcessor:
                 if p and p not in seen:
                     seen.add(p)
                     unique_paths.append(p)
-            
+
+            logger.info(f"Checking {len(unique_paths)} potential COM cache locations...")
+
             # Clear each cache location
+            cleared_count = 0
             for gen_py_path in unique_paths:
-                if os.path.exists(gen_py_path):
+                exists = os.path.exists(gen_py_path)
+                logger.debug(f"Cache path check: {gen_py_path} - {'EXISTS' if exists else 'not found'}")
+
+                if exists:
                     try:
                         logger.info(f"Clearing COM cache at {gen_py_path}")
                         shutil.rmtree(gen_py_path)
+                        cleared_count += 1
                     except Exception as e:
                         logger.warning(f"Could not clear cache at {gen_py_path}: {e}")
-                        
+
+            logger.info(f"COM cache clearing complete: {cleared_count} location(s) cleared")
         except Exception as e:
             logger.warning(f"Failed to clear COM cache: {e}")
 
@@ -670,13 +729,17 @@ class WordProcessor:
         try:
             # Open the document
             logger.debug(f"Opening document: {target_file}")
+            # Use Documents.Add instead of Open to create a new document based on the template
+            # This prevents modifying the original template file and avoids file lock issues
+            # especially with OneDrive/Office 365 AutoSave
             doc = self.safe_com_call(
-                self.word_app.Documents.Open,
-                target_file, False, False
+                self.word_app.Documents.Add,
+                Template=target_file,
+                Visible=False
             )
 
             if not doc:
-                return False, f"Failed to open document: {target_file}"
+                return False, f"Failed to create document from template: {target_file}"
 
             # Unprotect if necessary
             if doc.ProtectionType != PROTECTION_NONE:
@@ -690,9 +753,23 @@ class WordProcessor:
             self.replace_dates(doc, current_date)
 
             # Set printer and print
-            self.word_app.ActivePrinter = printer_name
-            logger.debug(f"Printing to: {printer_name}")
-            self.safe_com_call(doc.PrintOut, Background=False)
+            old_printer = self.word_app.ActivePrinter
+            try:
+                if printer_name != old_printer:
+                    self.word_app.ActivePrinter = printer_name
+                    logger.debug(f"Set active printer to: {printer_name}")
+                
+                logger.debug(f"Printing to: {printer_name}")
+                self.safe_com_call(doc.PrintOut, Background=False)
+                
+            finally:
+                # Restore original printer preference if we changed it
+                # This prevents the script from messing up the user's Word settings
+                if old_printer and old_printer != printer_name:
+                    try:
+                        self.word_app.ActivePrinter = old_printer
+                    except Exception as e:
+                        logger.warning(f"Could not restore printer selection: {e}")
 
             # Close document
             self.safe_com_call(doc.Close, CLOSE_NO_SAVE)
