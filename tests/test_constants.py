@@ -136,7 +136,7 @@ class TestUIConstants:
     def test_window_height(self):
         """Test window height."""
         assert isinstance(WINDOW_HEIGHT, int)
-        assert WINDOW_HEIGHT == 720
+        assert WINDOW_HEIGHT == 880
 
     def test_window_resizable(self):
         """Test window resizable setting."""

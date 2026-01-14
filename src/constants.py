@@ -44,7 +44,7 @@ DATE_PLACEHOLDER: Final = "{{DATE}}"
 
 # UI Constants
 WINDOW_WIDTH: Final = 640
-WINDOW_HEIGHT: Final = 720
+WINDOW_HEIGHT: Final = 880
 WINDOW_RESIZABLE: Final = False
 
 # Progress bar

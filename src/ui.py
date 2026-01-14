@@ -140,7 +140,7 @@ class ScheduleAppUI:
     def _create_widgets(self) -> None:
         """Create all UI widgets."""
         # Background Container
-        bg_container = ttk.Frame(self.root, padding="40")
+        bg_container = ttk.Frame(self.root, padding="32")
         bg_container.pack(fill="both", expand=True)
 
         # Header Section
@@ -158,7 +158,7 @@ class ScheduleAppUI:
     def _create_header(self, parent: ttk.Frame) -> None:
         """Create the header section."""
         header_row = ttk.Frame(parent)
-        header_row.pack(fill="x", pady=(0, 40))
+        header_row.pack(fill="x", pady=(0, 32))
         ttk.Label(header_row, text="Shift Automator",
                  style="Header.TLabel").pack(anchor="w")
         ttk.Label(header_row, text="High-performance batch scheduling & printing",
