@@ -46,6 +46,8 @@ from .constants import (
     COM_INIT_CACHE_CLEAR_DELAY,
     COM_INIT_PROCESS_KILL_DELAY,
     COM_INIT_STABILIZATION_DELAY,
+    COM_INIT_VERIFICATION_RETRIES,
+    COM_INIT_VERIFICATION_DELAY,
 )
 
 from .logger import get_logger
@@ -317,6 +319,7 @@ class WordProcessor:
         Verify that the Word connection is actually working.
 
         This catches cases where Dispatch returns an object but COM is broken.
+        Uses retry logic because Word may need time to fully initialize.
 
         Args:
             app: The Word application object to verify
@@ -325,15 +328,48 @@ class WordProcessor:
             True if the connection is valid, False otherwise
         """
         if app is None:
+            logger.warning("Word connection verification failed: app is None")
             return False
 
-        try:
-            # Try to access a simple property - this will fail if COM is broken
-            _ = app.Name
-            return True
-        except Exception as e:
-            logger.warning(f"Word connection verification failed: {e}")
-            return False
+        max_retries = COM_INIT_VERIFICATION_RETRIES
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.debug(f"Verification attempt {attempt}/{max_retries}...")
+                
+                # Try to access a simple property - this will fail if COM is broken
+                name = app.Name
+                logger.info(f"Word connection verified: {name}")
+                
+                # Also try to access Version for additional verification
+                try:
+                    version = app.Version
+                    logger.info(f"Word version: {version}")
+                except Exception:
+                    pass  # Version is nice to have but not required
+                
+                return True
+                
+            except Exception as e:
+                error_str = str(e)
+                logger.warning(f"Verification attempt {attempt}/{max_retries} failed: {error_str}")
+                
+                # Check if this is a "call rejected" type error (Word is busy)
+                if any(indicator in error_str.lower() for indicator in ["rejected", "busy", "0x80010001"]):
+                    if attempt < max_retries:
+                        logger.info(f"Word appears busy, waiting {COM_INIT_VERIFICATION_DELAY}s before retry...")
+                        time.sleep(COM_INIT_VERIFICATION_DELAY)
+                        continue
+                
+                # For other errors on non-final attempts, also retry
+                if attempt < max_retries:
+                    time.sleep(COM_INIT_VERIFICATION_DELAY)
+                    continue
+                    
+                logger.error(f"Word connection verification failed after {max_retries} attempts: {e}")
+                return False
+        
+        return False
 
     def _safe_quit_app(self, app: Any) -> None:
         """
