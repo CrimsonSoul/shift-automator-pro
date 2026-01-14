@@ -15,6 +15,27 @@ from src.word_processor import WordProcessor, HAS_PYWIN32
 from src.constants import DOCX_EXTENSION
 
 
+def create_word_mocks(mock_win32_client, mock_word_app):
+    """
+    Helper to configure all dispatch methods to return the same mock Word app.
+    
+    This accounts for the multi-strategy dispatch approach where GetObject is tried first,
+    then dynamic.Dispatch, DispatchEx, and standard Dispatch.
+    """
+    # Mock GetObject (tried first) - needs to return the app
+    mock_win32_client.GetObject.return_value = mock_word_app
+    
+    # Mock all other dispatch methods to return the same app (as fallbacks)
+    mock_win32_client.Dispatch.return_value = mock_word_app
+    mock_win32_client.DispatchEx.return_value = mock_word_app
+    mock_win32_client.dynamic.Dispatch.return_value = mock_word_app
+    
+    # Mock app.Name property access for connection verification
+    mock_word_app.Name = "Microsoft Word"
+    
+    return mock_word_app
+
+
 @pytest.mark.skipif(not HAS_PYWIN32, reason="pywin32 not available")
 class TestWordProcessor:
     """Unit tests for WordProcessor class."""
@@ -25,23 +46,23 @@ class TestWordProcessor:
         assert processor.word_app is None
         assert processor._initialized is False
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_initialize_success(self, mock_win32, mock_pythoncom):
+    def test_initialize_success(self, mock_win32, mock_pythoncom, mock_sleep):
         """Test successful Word application initialization."""
         mock_word_app = MagicMock()
-        # Mock all possible dispatch methods to return the same mock app
-        mock_win32.Dispatch.return_value = mock_word_app
-        mock_win32.DispatchEx.return_value = mock_word_app
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
+        
+        # Mock cleanup methods to avoid side effects
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
 
-        processor = WordProcessor()
-        processor.initialize()
-
-        assert processor._initialized is True
-        assert processor.word_app == mock_word_app
-        mock_word_app.Visible = False
-        mock_word_app.DisplayAlerts = 0
+            assert processor._initialized is True
+            assert processor.word_app == mock_word_app
+            mock_word_app.Visible = False
+            mock_word_app.DisplayAlerts = 0
 
     def test_initialize_without_pywin32(self):
         """Test initialization fails gracefully without pywin32."""
@@ -51,49 +72,55 @@ class TestWordProcessor:
                 processor.initialize()
             assert "requires Windows with pywin32" in str(exc_info.value)
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_initialize_already_initialized(self, mock_win32, mock_pythoncom):
+    def test_initialize_already_initialized(self, mock_win32, mock_pythoncom, mock_sleep):
         """Test that initialize is idempotent."""
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
-        processor = WordProcessor()
-        processor.initialize()
-        processor.initialize()  # Should not re-initialize
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
+            processor.initialize()  # Should not re-initialize
 
-        # Should only call Dispatch once (via Dynamic Dispatch in current implementation)
-        assert mock_win32.dynamic.Dispatch.call_count == 1
+            # GetObject is called once during first initialization (second call is skipped)
+            assert mock_win32.GetObject.call_count == 1
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_shutdown(self, mock_win32, mock_pythoncom):
+    def test_shutdown(self, mock_win32, mock_pythoncom, mock_sleep):
         """Test Word application shutdown."""
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
-        processor = WordProcessor()
-        processor.initialize()
-        processor.shutdown()
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
+            processor.shutdown()
 
-        mock_word_app.Quit.assert_called_once()
-        assert processor.word_app is None
-        assert processor._initialized is False
+            mock_word_app.Quit.assert_called_once()
+            assert processor.word_app is None
+            assert processor._initialized is False
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
-    def test_shutdown_error_handling(self, mock_win32, mock_pythoncom):
+    def test_shutdown_error_handling(self, mock_win32, mock_pythoncom, mock_sleep):
         """Test shutdown handles errors gracefully."""
         mock_word_app = MagicMock()
         mock_word_app.Quit.side_effect = Exception("Quit error")
-        mock_win32.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
-        processor = WordProcessor()
-        processor.initialize()
-        processor.shutdown()  # Should not raise
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
+            processor.shutdown()  # Should not raise
 
-        assert processor.word_app is None
-        assert processor._initialized is False
+            assert processor.word_app is None
+            assert processor._initialized is False
 
     def test_find_template_file_success(self, tmp_path):
         """Test finding a template file successfully."""
@@ -205,13 +232,15 @@ class TestWordProcessor:
         assert "Some other error" in str(exc_info.value)
         assert mock_func.call_count == 1  # No retries
 
-    def test_context_manager(self):
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
+    def test_context_manager(self, mock_sleep):
         """Test WordProcessor as context manager."""
         with patch('src.word_processor.pythoncom'), \
-             patch('src.word_processor.win32com.client') as mock_win32:
+             patch('src.word_processor.win32com.client') as mock_win32, \
+             patch.object(WordProcessor, '_perform_preflight_cleanup'):
 
             mock_word_app = MagicMock()
-            mock_win32.dynamic.Dispatch.return_value = mock_word_app
+            create_word_mocks(mock_win32, mock_word_app)
 
             with WordProcessor() as processor:
                 assert processor._initialized is True
@@ -246,16 +275,18 @@ class TestWordProcessor:
         first_call_args = mock_find.Execute.call_args_list[0]
         assert first_call_args[0][0] == DATE_PLACEHOLDER
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
     @patch('src.word_processor.win32print')
-    def test_print_document_success(self, mock_win32print, mock_win32, mock_pythoncom, tmp_path):
+    def test_print_document_success(self, mock_win32print, mock_win32, mock_pythoncom, mock_sleep, tmp_path):
         """Test successful document printing."""
         # Mock printer status to be ready
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
+        
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
         # Create test template
         template_folder = tmp_path / "templates"
@@ -267,57 +298,63 @@ class TestWordProcessor:
         mock_doc.PrintOut = MagicMock()  # Make PrintOut accept any args
         mock_word_app.Documents.Open.return_value = mock_doc
 
-        processor = WordProcessor()
-        processor.initialize()
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
 
-        success, error = processor.print_document(
-            str(template_folder),
-            "Monday",
-            date(2026, 1, 15),
-            "Test Printer"
-        )
+            success, error = processor.print_document(
+                str(template_folder),
+                "Monday",
+                date(2026, 1, 15),
+                "Test Printer"
+            )
 
-        assert success is True
-        assert error is None
-        mock_word_app.Documents.Open.assert_called_once()
-        mock_doc.PrintOut.assert_called_once()
-        mock_doc.Close.assert_called_once()
+            assert success is True
+            assert error is None
+            mock_word_app.Documents.Open.assert_called_once()
+            mock_doc.PrintOut.assert_called_once()
+            mock_doc.Close.assert_called_once()
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
     @patch('src.word_processor.win32print')
-    def test_print_document_template_not_found(self, mock_win32print, mock_win32, mock_pythoncom):
+    def test_print_document_template_not_found(self, mock_win32print, mock_win32, mock_pythoncom, mock_sleep):
         """Test printing with missing template."""
         # Mock printer status to be ready
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
+        
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
-        processor = WordProcessor()
-        processor.initialize()
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
 
-        success, error = processor.print_document(
-            "/nonexistent/folder",
-            "MissingDay",
-            date(2026, 1, 15),
-            "Test Printer"
-        )
+            success, error = processor.print_document(
+                "/nonexistent/folder",
+                "MissingDay",
+                date(2026, 1, 15),
+                "Test Printer"
+            )
 
-        assert success is False
-        assert error is not None
-        assert "not found" in error.lower()
+            assert success is False
+            assert error is not None
+            assert "not found" in error.lower()
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
     @patch('src.word_processor.win32print')
-    def test_print_document_unprotect(self, mock_win32print, mock_win32, mock_pythoncom):
+    def test_print_document_unprotect(self, mock_win32print, mock_win32, mock_pythoncom, mock_sleep):
         """Test document is unprotected before modification."""
         # Mock printer status to be ready
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
+        
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
         # Create test template
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -329,33 +366,36 @@ class TestWordProcessor:
             mock_doc.PrintOut = MagicMock()  # Accept any args
             mock_word_app.Documents.Open.return_value = mock_doc
 
-            processor = WordProcessor()
-            processor.initialize()
+            with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+                processor = WordProcessor()
+                processor.initialize()
 
-            processor.print_document(
-                str(template_folder),
-                "Monday",
-                date(2026, 1, 15),
-                "Test Printer"
-            )
+                processor.print_document(
+                    str(template_folder),
+                    "Monday",
+                    date(2026, 1, 15),
+                    "Test Printer"
+                )
 
-            mock_doc.Unprotect.assert_called_once()
+                mock_doc.Unprotect.assert_called_once()
 
 
 @pytest.mark.skipif(not HAS_PYWIN32, reason="pywin32 not available")
 class TestWordProcessorIntegration:
     """Integration tests for WordProcessor with mocked COM."""
 
+    @patch('src.word_processor.time.sleep')  # Skip delays in tests
     @patch('src.word_processor.pythoncom')
     @patch('src.word_processor.win32com.client')
     @patch('src.word_processor.win32print')
-    def test_print_multiple_documents(self, mock_win32print, mock_win32, mock_pythoncom, tmp_path):
+    def test_print_multiple_documents(self, mock_win32print, mock_win32, mock_pythoncom, mock_sleep, tmp_path):
         """Test printing multiple documents in sequence."""
         # Mock printer status to be ready
         mock_win32print.OpenPrinter.return_value = 1
         mock_win32print.GetPrinter.return_value = {'Status': 0}
+        
         mock_word_app = MagicMock()
-        mock_win32.dynamic.Dispatch.return_value = mock_word_app
+        create_word_mocks(mock_win32, mock_word_app)
 
         # Create test templates
         template_folder = tmp_path / "templates"
@@ -368,23 +408,24 @@ class TestWordProcessorIntegration:
         mock_doc.PrintOut = MagicMock()  # Accept any args
         mock_word_app.Documents.Open.return_value = mock_doc
 
-        processor = WordProcessor()
-        processor.initialize()
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
 
-        results = []
-        for day in ["Monday", "Tuesday", "Wednesday"]:
-            success, error = processor.print_document(
-                str(template_folder),
-                day,
-                date(2026, 1, 15),
-                "Test Printer"
-            )
-            results.append((success, error))
+            results = []
+            for day in ["Monday", "Tuesday", "Wednesday"]:
+                success, error = processor.print_document(
+                    str(template_folder),
+                    day,
+                    date(2026, 1, 15),
+                    "Test Printer"
+                )
+                results.append((success, error))
 
-        # All should succeed
-        for success, error in results:
-            assert success is True
-            assert error is None
+            # All should succeed
+            for success, error in results:
+                assert success is True
+                assert error is None
 
-        # Should print 3 times
-        assert mock_doc.PrintOut.call_count == 3
+            # Should print 3 times
+            assert mock_doc.PrintOut.call_count == 3
