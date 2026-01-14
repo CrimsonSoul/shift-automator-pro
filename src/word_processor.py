@@ -135,10 +135,12 @@ class WordProcessor:
         self._perform_preflight_cleanup()
 
         # Define dispatch strategies in order of preference
+        # We prioritize Dynamic Dispatch to bypass potentially corrupted gen_py caches
+        # caused by version mismatches or previous failed runs.
         dispatch_strategies = [
-            ("Standard Dispatch", lambda: win32com.client.Dispatch("Word.Application")),
-            ("DispatchEx", lambda: win32com.client.DispatchEx("Word.Application")),
             ("Dynamic Dispatch", lambda: win32com.client.dynamic.Dispatch("Word.Application")),
+            ("DispatchEx", lambda: win32com.client.DispatchEx("Word.Application")),
+            ("Standard Dispatch", lambda: win32com.client.Dispatch("Word.Application")),
         ]
 
         for strategy_name, dispatch_func in dispatch_strategies:
