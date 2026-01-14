@@ -71,6 +71,7 @@ class MockUI:
         self.printer_var = MagicMock()
         self.printer_dropdown = MagicMock()
         self.status_label = MagicMock()
+        self.log_widget = MagicMock()
         self.progress = MagicMock()
         self.print_btn = MagicMock()
         self.cancel_btn = MagicMock()
@@ -79,7 +80,8 @@ class MockUI:
         self.show_warning = MagicMock(side_effect=self._record_warning)
         self.show_error = MagicMock(side_effect=self._record_error)
         self.show_info = MagicMock(side_effect=self._record_info)
-        self.update_status = MagicMock(side_effect=self._record_status)
+        self.log = MagicMock(side_effect=self._record_log)
+        self.update_progress = MagicMock(side_effect=self._record_progress)
 
     @property
     def status_history(self) -> List[str]:
@@ -93,10 +95,11 @@ class MockUI:
     def warning_messages(self) -> List[str]:
         return [call[1] for call in self.warning_calls]
 
-    def _record_status(self, message: str, progress: Optional[float]) -> None:
+    def _record_log(self, message: str) -> None:
         self.status_messages.append(message)
-        if progress is not None:
-            self.progress_values.append(progress)
+
+    def _record_progress(self, progress: float) -> None:
+        self.progress_values.append(progress)
 
     def _record_error(self, title: str, message: str) -> None:
         self.error_calls.append((title, message))

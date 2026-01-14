@@ -59,8 +59,8 @@ def test_ui_cancel_flow(root):
     app = ShiftAutomatorApp(root)
     app.ui = ui
     
-    # Mock the update_status method on the instance
-    ui.update_status = MagicMock()
+    # Mock the log method on the instance
+    ui.log = MagicMock()
     
     app._processing_thread = MagicMock()
     app._processing_thread.is_alive.return_value = True
@@ -68,6 +68,6 @@ def test_ui_cancel_flow(root):
     app.cancel_processing()
     
     assert app._cancel_requested is True
-    ui.update_status.assert_called()
-    args, _ = ui.update_status.call_args
+    ui.log.assert_called()
+    args, _ = ui.log.call_args
     assert "Cancellation requested" in args[0]

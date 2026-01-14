@@ -49,7 +49,7 @@ class TestScheduleAppUI:
         assert ui.start_date_picker is not None
         assert ui.end_date_picker is not None
         assert ui.printer_var is not None
-        assert ui.status_label is not None
+        assert ui.log_widget is not None
         assert ui.progress is not None
         assert ui.print_btn is not None
         assert ui.cancel_btn is not None
@@ -160,24 +160,24 @@ class TestScheduleAppUI:
         ui.set_cancel_button_state("normal")
         assert ui.cancel_btn.cget("state") == "normal"
 
-    def test_update_status(self, root):
-        """Test updating status label and progress."""
+    def test_update_progress(self, root):
+        """Test updating progress bar."""
         ui = ScheduleAppUI(root)
 
-        ui.update_status("Test message", 50.0)
-
-        assert ui.status_label.cget("text") == "Test message"
+        ui.update_progress(50.0)
         assert ui.progress_var.get() == 50.0
 
-    def test_update_status_without_progress(self, root):
-        """Test updating status without changing progress."""
+    def test_log(self, root):
+        """Test appending message to log widget."""
         ui = ScheduleAppUI(root)
-        ui.progress_var.set(25.0)
-
-        ui.update_status("Test message", None)
-
-        assert ui.status_label.cget("text") == "Test message"
-        assert ui.progress_var.get() == 25.0  # Unchanged
+        test_message = "Test activity log message"
+        
+        ui.log(test_message)
+        
+        # In read-only mode it's hard to check content directly without enabling
+        # but we can check if it was inserted
+        content = ui.log_widget.get("1.0", tk.END)
+        assert test_message in content
 
     @patch('src.ui.messagebox.showerror')
     def test_show_error(self, mock_showerror, root):

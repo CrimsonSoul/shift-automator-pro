@@ -35,7 +35,7 @@ def test_workflow_full_run_success(mock_wp: MockWordProcessor, mock_ui: MockUI):
     
     # Verify results
     assert mock_wp.call_count == 4
-    assert mock_ui.status_history[-1] == "Complete!"
+    assert mock_ui.status_history[-1] == "Processing COMPLETE!"
     assert not any("Error" in str(msg) for msg in mock_ui.info_messages)
 
 def test_workflow_partial_failure(mock_wp: MockWordProcessor, mock_ui: MockUI):
