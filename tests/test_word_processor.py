@@ -434,3 +434,55 @@ class TestWordProcessorIntegration:
 
             # Should print 3 times
             assert mock_doc.PrintOut.call_count == 3
+
+    def test_find_template_file_empty(self, tmp_path):
+        """Test finding an empty template file returns None."""
+        template_folder = tmp_path / "templates"
+        template_folder.mkdir()
+        empty_file = template_folder / "Monday.docx"
+        empty_file.write_text("")  # Empty file
+
+        processor = WordProcessor()
+        result = processor.find_template_file(str(template_folder), "Monday")
+
+        assert result is None
+
+    def test_find_template_file_unicode_name(self, tmp_path):
+        """Test finding template with unicode filename."""
+        template_folder = tmp_path / "templates"
+        template_folder.mkdir()
+        # Create file with unicode characters
+        (template_folder / "Journée.docx").write_text("test")
+
+        processor = WordProcessor()
+        result = processor.find_template_file(str(template_folder), "Journée")
+
+        assert result is not None
+        assert "Journée.docx" in result
+
+    @patch('src.word_processor.time.sleep')
+    @patch('src.word_processor.pythoncom')
+    @patch('src.word_processor.win32com.client')
+    @patch('src.word_processor.win32print')
+    @patch('src.word_processor.ThreadPoolExecutor')
+    def test_printer_status_timeout(self, mock_executor, mock_win32print, mock_win32, mock_pythoncom, mock_sleep):
+        """Test printer status check handles timeout gracefully."""
+        from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+        # Mock a slow printer check that times out
+        mock_future = MagicMock()
+        mock_future.result.side_effect = FuturesTimeoutError("Printer check timed out")
+        mock_executor.return_value.__enter__.return_value.submit.return_value = mock_future
+
+        mock_word_app = MagicMock()
+        create_word_mocks(mock_win32, mock_word_app)
+
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
+
+            # Should return True (proceed) instead of blocking
+            is_ready, error = processor._check_printer_status("Slow Printer")
+
+            assert is_ready is True
+            assert error is None

@@ -15,3 +15,5 @@ mypy==1.8.0
 
 # Type stubs
 types-Pillow==10.1.0.2
+# Note: pywin32 doesn't have official type stubs
+# Consider using pyright's bundled stubs or inline annotations for better type checking

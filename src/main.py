@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from datetime import date, timedelta
-from typing import Optional
+from typing import Optional, Callable
 
 import tkinter as tk
 
@@ -19,7 +19,8 @@ from .constants import (
     PRINT_INITIAL_DELAY,
     PRINT_MAX_DELAY,
     TRANSIENT_ERROR_KEYWORDS,
-    CONFIG_DEBOUNCE_DELAY
+    CONFIG_DEBOUNCE_DELAY,
+    PRINTER_DEFAULT_PLACEHOLDER
 )
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
@@ -153,12 +154,15 @@ class ShiftAutomatorApp:
                     self._save_current_config()
                 except Exception as e:
                     logger.error(f"Failed to save config: {e}")
-                    # Show error to user (schedule on main thread)
+                    # Show error to user (schedule on main thread) if window still exists
                     try:
-                        self.root.after(0, lambda: self.ui.show_warning(
-                            "Configuration Save Error",
-                            f"Could not save configuration: {e}\n\nYour settings may not be preserved."
-                        ))
+                        if self.root.winfo_exists():
+                            self.root.after(0, lambda: self.ui.show_warning(
+                                "Configuration Save Error",
+                                f"Could not save configuration: {e}\n\nYour settings may not be preserved."
+                            ))
+                    except tk.TclError:
+                        logger.warning("Cannot show config save error - window already destroyed")
                     except Exception as ui_error:
                         logger.error(f"Could not show config save error to user: {ui_error}")
                 finally:
@@ -191,7 +195,7 @@ class ShiftAutomatorApp:
             return False, "Please select a Day Templates folder"
         if not night_folder:
             return False, "Please select a Night Templates folder"
-        if not printer_name or printer_name == "Choose Printer":
+        if not printer_name or printer_name == PRINTER_DEFAULT_PLACEHOLDER:
             return False, "Please select a target printer"
 
         # Validate folder paths
@@ -301,6 +305,34 @@ class ShiftAutomatorApp:
 
         return False, last_error
 
+    def _schedule_ui_update(self, callback: Callable, *args) -> None:
+        """
+        Schedule a UI callback on the main thread.
+
+        This replaces lambda capture pattern with a clearer helper method.
+
+        Args:
+            callback: The UI method to call
+            *args: Arguments to pass to the callback
+        """
+        def _update():
+            callback(*args)
+        self.root.after(0, _update)
+
+    def _schedule_log(self, message: str, progress: Optional[float] = None) -> None:
+        """
+        Schedule a log update on the main thread.
+
+        Args:
+            message: Message to log
+            progress: Optional progress value to update
+        """
+        def _update():
+            self.ui.log(message)
+            if progress is not None:
+                self.ui.update_progress(progress)
+        self.root.after(0, _update)
+
     def _process_batch(self) -> None:
         """Process the batch of schedules."""
         start_date = self.ui.get_start_date()
@@ -359,8 +391,7 @@ class ShiftAutomatorApp:
 
                     # Update progress
                     progress = (i / total_days) * 100
-                    self.root.after(0, lambda m=f"Processing {day_name} {display_date}...",
-                                   p=progress: (self.ui.log(m), self.ui.update_progress(p)))
+                    self._schedule_log(f"Processing {day_name} {display_date}...", progress)
 
                     # Process Day Shift
                     day_template = get_shift_template_name(current_date, "day")
@@ -374,10 +405,10 @@ class ShiftAutomatorApp:
                             'template': day_template,
                             'error': error
                         })
-                        self.root.after(0, lambda e=error: self.ui.log(f"Error printing day shift: {e}"))
+                        self._schedule_log(f"Error printing day shift: {error}")
                         logger.error(f"Failed to print day shift for {current_date}: {error}")
                     else:
-                        self.root.after(0, lambda: self.ui.log(f"Sent {day_name} Day Shift to printer."))
+                        self._schedule_log(f"Sent {day_name} Day Shift to printer.")
 
                     # Check for cancellation request before night shift
                     with self._cancel_lock:
@@ -399,20 +430,20 @@ class ShiftAutomatorApp:
                             'template': night_template,
                             'error': error
                         })
-                        self.root.after(0, lambda e=error: self.ui.log(f"Error printing night shift: {e}"))
+                        self._schedule_log(f"Error printing night shift: {error}")
                         logger.error(f"Failed to print night shift for {current_date}: {error}")
                     else:
-                        self.root.after(0, lambda: self.ui.log(f"Sent {day_name} Night Shift to printer."))
+                        self._schedule_log(f"Sent {day_name} Night Shift to printer.")
 
                 # Show completion status
                 if cancelled:
-                    self.root.after(0, lambda: self.ui.log("Processing CANCELLED by user."))
-                    self.root.after(0, lambda pd=processed_days, td=total_days: self.ui.show_info(
+                    self._schedule_log("Processing CANCELLED by user.")
+                    self._schedule_ui_update(self.ui.show_info,
                         "Processing Cancelled",
-                        f"Cancelled by user.\n\nProcessed {pd} of {td} days before cancellation."
-                    ))
+                        f"Cancelled by user.\n\nProcessed {processed_days} of {total_days} days before cancellation.")
                 else:
-                    self.root.after(0, lambda: (self.ui.log("Processing COMPLETE!"), self.ui.update_progress(PROGRESS_MAX)))
+                    self._schedule_log("Processing COMPLETE!")
+                    self._schedule_ui_update(self.ui.update_progress, PROGRESS_MAX)
 
                     # Show results
                     if failed_operations:
@@ -428,17 +459,16 @@ class ShiftAutomatorApp:
             error_type = type(e).__name__
             error_msg = str(e)
             full_error = f"{error_type}: {error_msg}"
-            
+
             logger.exception("Error during batch processing")
-            self.root.after(0, lambda err=full_error: self.ui.log(f"FATAL ERROR: {err}"))
-            self.root.after(0, lambda err=full_error: self.ui.show_error(
+            self._schedule_log(f"FATAL ERROR: {full_error}")
+            self._schedule_ui_update(self.ui.show_error,
                 "Processing Error",
-                f"An error occurred during processing:\n\n{err}"
-            ))
+                f"An error occurred during processing:\n\n{full_error}")
         finally:
             # Re-enable buttons
-            self.root.after(0, lambda: self.ui.set_print_button_state("normal"))
-            self.root.after(0, lambda: self.ui.set_cancel_button_state("disabled"))
+            self._schedule_ui_update(self.ui.set_print_button_state, "normal")
+            self._schedule_ui_update(self.ui.set_cancel_button_state, "disabled")
 
     def _show_failure_summary(self, failed_operations: list[dict]) -> None:
         """

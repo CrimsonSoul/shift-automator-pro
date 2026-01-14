@@ -6,7 +6,7 @@ This module contains all Tkinter UI components and styling.
 
 import os
 import tkinter as tk
-from datetime import date
+from datetime import date, datetime
 from tkinter import messagebox, filedialog, ttk, scrolledtext
 from tkcalendar import DateEntry
 from typing import Optional, Callable, List, Any, Union
@@ -375,21 +375,33 @@ class ScheduleAppUI:
 
     def get_start_date(self) -> Optional[date]:
         """
-        Get the start date.
+        Get the start date with error handling.
 
         Returns:
             The start date from the date picker, or None if not available
         """
-        return self.start_date_picker.get_date() if self.start_date_picker else None
+        if not self.start_date_picker:
+            return None
+        try:
+            return self.start_date_picker.get_date()
+        except Exception as e:
+            logger.warning(f"Error getting start date: {e}")
+            return None
 
     def get_end_date(self) -> Optional[date]:
         """
-        Get the end date.
+        Get the end date with error handling.
 
         Returns:
             The end date from the date picker, or None if not available
         """
-        return self.end_date_picker.get_date() if self.end_date_picker else None
+        if not self.end_date_picker:
+            return None
+        try:
+            return self.end_date_picker.get_date()
+        except Exception as e:
+            logger.warning(f"Error getting end date: {e}")
+            return None
 
     def set_start_command(self, command: CommandCallback) -> None:
         """
@@ -459,7 +471,7 @@ class ScheduleAppUI:
         """
         if self.log_widget:
             self.log_widget.config(state="normal")
-            self.log_widget.insert(tk.END, f"[{date.today().strftime('%H:%M:%S')}] {message}\n")
+            self.log_widget.insert(tk.END, f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
             self.log_widget.see(tk.END)
             self.log_widget.config(state="disabled")
 

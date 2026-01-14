@@ -5,6 +5,7 @@ These tests verify the full workflow from UI interaction to document printing.
 """
 
 import tempfile
+import json
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -193,3 +194,117 @@ class TestEndToEndWorkflow:
 
         # Step 6: Verify all templates were processed
         assert len(dates) == 7  # 7 days in a week
+
+
+class TestConfigAtomicWrite:
+    """Integration tests for atomic config writes."""
+
+    def test_atomic_write_preserves_on_failure(self, tmp_path):
+        """Test that interrupted save doesn't corrupt existing config."""
+        config_file = tmp_path / "config.json"
+        manager = ConfigManager(str(config_file))
+
+        # Save initial config
+        original_config = AppConfig(
+            day_folder=str(tmp_path / "original_day"),
+            night_folder=str(tmp_path / "original_night"),
+            printer_name="Original Printer"
+        )
+        manager.save(original_config)
+
+        # Verify original was saved
+        loaded = manager.load()
+        assert loaded.day_folder == original_config.day_folder
+        assert loaded.printer_name == original_config.printer_name
+
+        # Try to save with mocked failure (simulating write error)
+        # The atomic write should fail but original should remain intact
+        try:
+            with patch('os.fdopen', side_effect=IOError("Write error")):
+                bad_config = AppConfig(day_folder="/bad/path")
+                manager.save(bad_config)
+        except IOError:
+            pass  # Expected
+
+        # Original config should still be intact
+        loaded_after = manager.load()
+        assert loaded_after.day_folder == str(tmp_path / "original_day")
+        assert loaded_after.printer_name == original_config.printer_name
+
+    def test_config_file_created_atomically(self, tmp_path):
+        """Test config file is created atomically (no partial writes)."""
+        config_file = tmp_path / "config.json"
+        manager = ConfigManager(str(config_file))
+
+        # Save config
+        config = AppConfig(day_folder="/test/path")
+        manager.save(config)
+
+        # Config should exist and be valid JSON
+        assert config_file.exists()
+        with open(config_file, 'r') as f:
+            data = json.load(f)
+
+        # Should be complete, not partial
+        assert "day_folder" in data
+        assert "night_folder" in data
+        assert "printer_name" in data
+
+
+class TestUtilsIntegration:
+    """Integration tests for utility functions."""
+
+    def test_get_available_font_fallback(self):
+        """Test font resolution falls back through list."""
+        # Skip if tkinter not available (non-GUI environment)
+        try:
+            from src.utils import get_available_font, HAS_TKINTER
+        except ImportError:
+            pytest.skip("tkinter not available in test environment")
+            return
+
+        if not HAS_TKINTER:
+            pytest.skip("tkinter not available in test environment")
+            return
+
+        import tkinter.font as tkfont
+
+        # Mock tkfont to return specific font list
+        original_families = tkfont.families
+        tkfont.families = lambda: ["Arial", "Tahoma"]
+
+        try:
+            # First preference not available
+            font = get_available_font(["Segoe UI", "Helvetica", "Arial"], 10)
+
+            # Should fall back to Arial
+            assert "Arial" in font
+        finally:
+            tkfont.families = original_families
+
+    def test_get_available_font_none_available(self):
+        """Test font resolution when no preferred fonts available."""
+        # Skip if tkinter not available (non-GUI environment)
+        try:
+            from src.utils import get_available_font, HAS_TKINTER
+        except ImportError:
+            pytest.skip("tkinter not available in test environment")
+            return
+
+        if not HAS_TKINTER:
+            pytest.skip("tkinter not available in test environment")
+            return
+
+        import tkinter.font as tkfont
+
+        # Mock tkfont to return specific font list
+        original_families = tkfont.families
+        tkfont.families = lambda: []
+
+        try:
+            font = get_available_font(["Segoe UI", "Arial"], 10)
+
+            # Should return TkDefaultFont
+            assert "TkDefaultFont" in font
+        finally:
+            tkfont.families = original_families

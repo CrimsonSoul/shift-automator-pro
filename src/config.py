@@ -5,6 +5,8 @@ This module handles loading, saving, and validating configuration settings.
 """
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -109,7 +111,7 @@ class ConfigManager:
 
     def save(self, config: Optional[AppConfig] = None) -> None:
         """
-        Save configuration to file.
+        Save configuration to file using atomic write pattern.
 
         Args:
             config: AppConfig instance to save (uses current config if None)
@@ -126,8 +128,24 @@ class ConfigManager:
             # Ensure parent directory exists
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config_to_save.to_dict(), f, indent=4)
+            # Atomic write: write to temp file first, then rename
+            fd, tmp_path = tempfile.mkstemp(
+                dir=self.config_path.parent,
+                suffix='.tmp'
+            )
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    json.dump(config_to_save.to_dict(), f, indent=4)
+                # os.replace is atomic on POSIX, near-atomic on Windows
+                os.replace(tmp_path, self.config_path)
+            except Exception:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
             logger.info(f"Configuration saved to {self.config_path}")
         except IOError as e:
             logger.error(f"Error saving config file: {e}")

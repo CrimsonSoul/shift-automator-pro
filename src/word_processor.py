@@ -13,6 +13,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from typing import Optional, Any, Tuple, Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # Platform-specific imports
 try:
@@ -42,6 +43,7 @@ from .constants import (
     COM_ERROR_DISP_E_BADINDEX,
     PRINTER_STATUS_OFFLINE,
     PRINTER_STATUS_ERROR,
+    PRINTER_STATUS_TIMEOUT,
     COM_INIT_MAX_RETRIES_PER_METHOD,
     COM_INIT_CACHE_CLEAR_DELAY,
     COM_INIT_PROCESS_KILL_DELAY,
@@ -192,26 +194,10 @@ class WordProcessor:
         """
         logger.info("Attempting subprocess launch strategy...")
 
-        # Try to find winword.exe
-        word_paths = [
-            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
-            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
-            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
-            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
-            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office 15", "root", "Office15", "WINWORD.EXE"),
-        ]
-
-        word_exe = None
-        for path in word_paths:
-            if os.path.exists(path):
-                word_exe = path
-                break
-
-        if not word_exe:
-            # Try via PATH
-            word_exe = "WINWORD.EXE"
-
+        word_exe = self._find_word_executable()
         process = None
+        app_connected = False
+
         try:
             # Launch Word with optimized flags:
             # /automation - suppresses startup dialogs and AutoRun macros
@@ -232,6 +218,7 @@ class WordProcessor:
                 try:
                     time.sleep(1.0)
                     app = win32com.client.GetObject(Class="Word.Application")
+                    app_connected = True
                     logger.info(f"Connected to Word on attempt {attempt + 1}")
                     return app
                 except Exception as e:
@@ -243,24 +230,57 @@ class WordProcessor:
 
         except Exception as e:
             logger.warning(f"Subprocess launch failed: {e}")
-            # CRITICAL FIX: Kill the process if we failed to connect to prevent zombie processes
-            if process is not None:
-                try:
-                    logger.info("Cleaning up failed subprocess Word instance...")
-                    process.terminate()
-                    # Give it a moment to close gracefully
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    # If terminate didn't work, kill it
-                    try:
-                        process.kill()
-                    except Exception:
-                        pass
-                except Exception as cleanup_error:
-                    logger.warning(f"Error cleaning up subprocess: {cleanup_error}")
+            raise
 
-            # Fall back to regular dispatch
-            return win32com.client.dynamic.Dispatch("Word.Application")
+        finally:
+            # Cleanup zombie process if we never connected
+            if process is not None and not app_connected:
+                self._terminate_process_safely(process)
+
+    def _find_word_executable(self) -> str:
+        """
+        Find Word executable path on the system.
+
+        Returns:
+            Path to winword.exe or fallback to system PATH
+        """
+        # Try to find winword.exe
+        word_paths = [
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office 15", "root", "Office15", "WINWORD.EXE"),
+        ]
+
+        for path in word_paths:
+            if os.path.exists(path):
+                return path
+
+        # Try via PATH
+        return "WINWORD.EXE"
+
+    def _terminate_process_safely(self, process: subprocess.Popen) -> None:
+        """
+        Safely terminate a subprocess process.
+
+        Args:
+            process: Popen object to terminate
+        """
+        try:
+            logger.info("Cleaning up failed subprocess Word instance...")
+            process.terminate()
+            # Give it a moment to close gracefully
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            # If terminate didn't work, kill it
+            try:
+                process.kill()
+                process.wait(timeout=1)
+            except Exception:
+                pass
+        except Exception as cleanup_error:
+            logger.warning(f"Error cleaning up subprocess: {cleanup_error}")
 
     def _perform_preflight_cleanup(self) -> None:
         """
@@ -632,6 +652,40 @@ class WordProcessor:
         # This should never happen (loop should always execute at least once)
         raise RuntimeError("COM call failed unexpectedly")
 
+    def _check_printer_status(self, printer_name: str) -> Tuple[bool, Optional[str]]:
+        """
+        Check printer status with timeout to prevent blocking on slow drivers.
+
+        Args:
+            printer_name: Name of the printer to check
+
+        Returns:
+            Tuple of (is_ready, error_message)
+        """
+        def _do_check():
+            phandle = win32print.OpenPrinter(printer_name)
+            try:
+                pinfo = win32print.GetPrinter(phandle, 2)
+                status = pinfo.get('Status', 0)
+                if status & PRINTER_STATUS_OFFLINE:
+                    return False, f"Printer '{printer_name}' is offline."
+                if status & PRINTER_STATUS_ERROR:
+                    return False, f"Printer '{printer_name}' reported an error state."
+                return True, None
+            finally:
+                win32print.ClosePrinter(phandle)
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_check)
+                return future.result(timeout=PRINTER_STATUS_TIMEOUT)
+        except FuturesTimeoutError:
+            logger.warning(f"Printer status check timed out for '{printer_name}'")
+            return True, None
+        except Exception as e:
+            logger.warning(f"Could not verify printer status for '{printer_name}': {e}")
+            return True, None
+
     def find_template_file(self, folder: str, template_name: str) -> Optional[str]:
         """
         Find a template file in the given folder using exact name matching.
@@ -703,22 +757,11 @@ class WordProcessor:
         if not self._initialized or not self.word_app:
             return False, "Word processor not initialized"
 
-        # Edge Case: Verify printer is ready/online (Windows only)
+        # Edge Case: Verify printer is ready/online (Windows only) with timeout
         if HAS_PYWIN32 and win32print:
-            try:
-                phandle = win32print.OpenPrinter(printer_name)
-                try:
-                    pinfo = win32print.GetPrinter(phandle, 2)
-                    status = pinfo.get('Status', 0)
-                    if status & PRINTER_STATUS_OFFLINE:
-                        return False, f"Printer '{printer_name}' is offline."
-                    if status & PRINTER_STATUS_ERROR:
-                        return False, f"Printer '{printer_name}' reported an error state."
-                finally:
-                    win32print.ClosePrinter(phandle)
-            except Exception as e:
-                logger.warning(f"Could not verify printer status for '{printer_name}': {e}")
-                # We continue anyway as some drivers don't report status correctly
+            is_ready, error = self._check_printer_status(printer_name)
+            if not is_ready:
+                return False, error
 
         # Find the template file
         target_file = self.find_template_file(folder, template_name)

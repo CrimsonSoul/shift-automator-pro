@@ -42,6 +42,9 @@ LOG_FILENAME: Final = "shift_automator.log"
 # Replacement Tokens
 DATE_PLACEHOLDER: Final = "{{DATE}}"
 
+# UI placeholder values
+PRINTER_DEFAULT_PLACEHOLDER: Final = "Choose Printer"
+
 # UI Constants
 WINDOW_WIDTH: Final = 640
 WINDOW_HEIGHT: Final = 880
@@ -72,6 +75,9 @@ COM_ERROR_DISP_E_BADINDEX: Final = "0x8002000b"   # DISP_E_BADINDEX (-2147352565
 # Printer Status Flags (from Windows API)
 PRINTER_STATUS_OFFLINE: Final = 0x00000080
 PRINTER_STATUS_ERROR: Final = 0x00000002
+
+# Printer check timeout
+PRINTER_STATUS_TIMEOUT: Final = 5.0  # seconds
 
 # Retry settings for print operations
 PRINT_MAX_RETRIES: Final = 3
@@ -111,12 +117,28 @@ class Colors:
 
 @dataclass(frozen=True)
 class Fonts:
-    """Font configuration for the application UI."""
-    main: tuple = ("Segoe UI Variable Display", 10)
-    bold: tuple = ("Segoe UI Variable Display", 10, "bold")
-    header: tuple = ("Segoe UI Variable Display", 24, "bold")
-    sub: tuple = ("Segoe UI Variable Display", 9)
-    button: tuple = ("Segoe UI Variable Display", 11, "bold")
+    """
+    Font configuration for the application UI.
+
+    Font resolution happens at runtime to support cross-platform compatibility.
+    See utils.get_available_font() for resolution logic.
+    """
+    main: tuple = ("Segoe UI", 10)
+    bold: tuple = ("Segoe UI", 10, "bold")
+    header: tuple = ("Segoe UI", 24, "bold")
+    sub: tuple = ("Segoe UI", 9)
+    button: tuple = ("Segoe UI", 11, "bold")
+
+
+# Font preference list for runtime resolution
+# These will be tried in order when fonts are initialized in UI
+FONT_PREFERENCES: Final = [
+    "Segoe UI Variable Display",
+    "Segoe UI",
+    "Arial",
+    "Helvetica",
+    "Tahoma"
+]
 
 
 # Global color and font instances

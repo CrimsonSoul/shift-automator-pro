@@ -330,3 +330,63 @@ class TestUIMethods:
         ui._on_printer_change()
 
         mock_callback.assert_called_once()
+
+    def test_log_timestamp_format(self, root):
+        """Test log messages include valid timestamps (not 00:00:00)."""
+        from datetime import datetime
+        ui = ScheduleAppUI(root)
+
+        test_message = "Test log entry"
+        ui.log(test_message)
+
+        # Get log content
+        content = ui.log_widget.get("1.0", tk.END)
+
+        # Check that timestamp doesn't show 00:00:00 (which happens with date.today())
+        # instead should show actual time
+        assert "[00:00:00]" not in content
+
+        # Verify format is [HH:MM:SS]
+        import re
+        timestamp_pattern = r'\[\d{2}:\d{2}:\d{2}\]'
+        assert re.search(timestamp_pattern, content) is not None
+
+    def test_get_start_date_exception_handling(self, root):
+        """Test get_start_date handles exceptions gracefully."""
+        ui = ScheduleAppUI(root)
+
+        # Mock get_date to raise exception
+        with patch.object(ui.start_date_picker, 'get_date', side_effect=Exception("Picker error")):
+            result = ui.get_start_date()
+
+            # Should return None instead of crashing
+            assert result is None
+
+    def test_get_end_date_exception_handling(self, root):
+        """Test get_end_date handles exceptions gracefully."""
+        ui = ScheduleAppUI(root)
+
+        # Mock get_date to raise exception
+        with patch.object(ui.end_date_picker, 'get_date', side_effect=Exception("Picker error")):
+            result = ui.get_end_date()
+
+            # Should return None instead of crashing
+            assert result is None
+
+    def test_get_start_date_no_picker(self, root):
+        """Test get_start_date when picker is None."""
+        ui = ScheduleAppUI(root)
+        ui.start_date_picker = None
+
+        result = ui.get_start_date()
+
+        assert result is None
+
+    def test_get_end_date_no_picker(self, root):
+        """Test get_end_date when picker is None."""
+        ui = ScheduleAppUI(root)
+        ui.end_date_picker = None
+
+        result = ui.get_end_date()
+
+        assert result is None
