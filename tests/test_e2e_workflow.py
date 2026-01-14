@@ -11,6 +11,9 @@ def test_workflow_full_run_success(mock_wp: MockWordProcessor, mock_ui: MockUI):
     """
     import tkinter as tk
     root = tk.Tk()
+    # Mock root.after to execute callbacks immediately
+    root.after = lambda delay, func, *args: func(*args)
+    
     app = ShiftAutomatorApp(root)
     
     # Inject mocks
@@ -39,6 +42,9 @@ def test_workflow_partial_failure(mock_wp: MockWordProcessor, mock_ui: MockUI):
     """Test workflow when some prints fail."""
     import tkinter as tk
     root = tk.Tk()
+    # Mock root.after to execute callbacks immediately
+    root.after = lambda delay, func, *args: func(*args)
+    
     app = ShiftAutomatorApp(root)
     app.ui = mock_ui  # type: ignore
     
@@ -69,6 +75,9 @@ def test_workflow_cancellation(mock_wp: MockWordProcessor, mock_ui: MockUI):
     """Test that cancellation stops the process early."""
     import tkinter as tk
     root = tk.Tk()
+    # Mock root.after to execute callbacks immediately
+    root.after = lambda delay, func, *args: func(*args)
+    
     app = ShiftAutomatorApp(root)
     app.ui = mock_ui  # type: ignore
     
