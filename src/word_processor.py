@@ -149,12 +149,17 @@ class WordProcessor:
         self._perform_preflight_cleanup()
 
         # Define dispatch strategies in order of preference
-        # We prioritize Dynamic Dispatch to bypass potentially corrupted gen_py caches
-        # caused by version mismatches or previous failed runs.
+        # Strategy 1: Try to connect to existing Word instance (if any survived cleanup)
+        # Strategy 2: Use GetObject to create/connect (sometimes more reliable)
+        # Strategy 3: Dynamic Dispatch (bypasses gen_py cache entirely)
+        # Strategy 4: DispatchEx (creates new instance in separate process)
+        # Strategy 5: Standard Dispatch (fallback)
         dispatch_strategies = [
+            ("GetObject", self._dispatch_via_getobject),
             ("Dynamic Dispatch", lambda: win32com.client.dynamic.Dispatch("Word.Application")),
             ("DispatchEx", lambda: win32com.client.DispatchEx("Word.Application")),
             ("Standard Dispatch", lambda: win32com.client.Dispatch("Word.Application")),
+            ("Subprocess Launch", self._dispatch_via_subprocess),
         ]
 
         for strategy_name, dispatch_func in dispatch_strategies:
@@ -164,6 +169,66 @@ class WordProcessor:
 
         logger.error("All dispatch strategies exhausted. Could not connect to Word.")
         return None
+
+    def _dispatch_via_getobject(self) -> Any:
+        """
+        Try to get Word via GetObject - can create new instance or connect to existing.
+        This method is sometimes more reliable than Dispatch for Office apps.
+        """
+        try:
+            # First try to get an existing instance
+            return win32com.client.GetObject(Class="Word.Application")
+        except Exception:
+            # No existing instance, try to create one via GetObject with empty path
+            # This forces Word to start fresh
+            return win32com.client.GetObject("", "Word.Application")
+
+    def _dispatch_via_subprocess(self) -> Any:
+        """
+        Launch Word via subprocess first, then connect to it.
+        This bypasses COM activation issues by starting Word directly.
+        """
+        logger.info("Attempting subprocess launch strategy...")
+        
+        # Try to find winword.exe
+        word_paths = [
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "root", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Microsoft Office", "Office16", "WINWORD.EXE"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "Microsoft Office 15", "root", "Office15", "WINWORD.EXE"),
+        ]
+        
+        word_exe = None
+        for path in word_paths:
+            if os.path.exists(path):
+                word_exe = path
+                break
+        
+        if not word_exe:
+            # Try via PATH
+            word_exe = "WINWORD.EXE"
+        
+        try:
+            # Launch Word with /automation flag (suppresses startup dialogs)
+            logger.info(f"Launching Word: {word_exe}")
+            subprocess.Popen(
+                [word_exe, "/automation"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            
+            # Wait for Word to start
+            time.sleep(3.0)
+            
+            # Now try to connect to it
+            return win32com.client.GetObject(Class="Word.Application")
+            
+        except Exception as e:
+            logger.warning(f"Subprocess launch failed: {e}")
+            # Fall back to regular dispatch
+            return win32com.client.dynamic.Dispatch("Word.Application")
 
     def _perform_preflight_cleanup(self) -> None:
         """
@@ -286,12 +351,27 @@ class WordProcessor:
             logger.debug(f"Error quitting Word app during cleanup: {e}")
 
     def _is_cache_error(self, e: Exception) -> bool:
-        """Check if the error might be caused by a corrupted COM cache or zombie process."""
+        """Check if the error might be caused by a corrupted COM cache, startup issue, or zombie process."""
         error_str = str(e).lower()
-        return (COM_ERROR_DISP_E_EXCEPTION.lower() in error_str or 
-                "-2147352567" in error_str or
-                COM_ERROR_DISP_E_BADINDEX.lower() in error_str or
-                "-2147352565" in error_str)
+        
+        # Check for known cache/startup related error codes
+        cache_error_indicators = [
+            # DISP_E_EXCEPTION - general COM exception (often cache or startup related)
+            COM_ERROR_DISP_E_EXCEPTION.lower(),
+            "-2147352567",
+            "0x80020009",
+            # DISP_E_BADINDEX - often indicates corrupted type library cache
+            COM_ERROR_DISP_E_BADINDEX.lower(),
+            "-2147352565",
+            "0x8002000b",
+            # Other indicators
+            "exception occurred",
+            "member not found",
+            "invalid class string",
+            "class not registered",
+        ]
+        
+        return any(indicator in error_str for indicator in cache_error_indicators)
 
     def _kill_word_processes(self) -> None:
         """Forcefully terminate any existing Word processes to ensure a clean slate."""
@@ -314,23 +394,60 @@ class WordProcessor:
 
     def _clear_com_cache(self) -> None:
         """Clear the win32com gen_py cache to resolve corruption issues."""
+        if not HAS_PYWIN32:
+            return
+            
         try:
-            # Get the path to gen_py
-            # In most pywin32 installations, it's in the temp directory
             import tempfile
-            gen_py_path = os.path.join(tempfile.gettempdir(), "gen_py")
             
-            if os.path.exists(gen_py_path):
-                logger.info(f"Clearing corrupted COM cache at {gen_py_path}")
-                shutil.rmtree(gen_py_path)
+            # List of potential gen_py cache locations
+            cache_paths = []
             
-            # Also try win32com.__gen_path__ if available
-            import win32com
-            if hasattr(win32com, "__gen_path__"):
-                alt_path = win32com.__gen_path__
-                if os.path.exists(alt_path) and alt_path != gen_py_path:
-                    logger.info(f"Clearing alternate COM cache at {alt_path}")
-                    shutil.rmtree(alt_path)
+            # 1. Standard temp directory location
+            cache_paths.append(os.path.join(tempfile.gettempdir(), "gen_py"))
+            
+            # 2. User's local app data (common on newer Windows/pywin32)
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                cache_paths.append(os.path.join(local_app_data, "Temp", "gen_py"))
+            
+            # 3. Try win32com's reported path
+            try:
+                import win32com
+                if hasattr(win32com, "__gen_path__"):
+                    cache_paths.append(win32com.__gen_path__)
+                # Also check gencache module
+                try:
+                    from win32com.client import gencache
+                    if hasattr(gencache, "GetGeneratePath"):
+                        cache_paths.append(gencache.GetGeneratePath())
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            
+            # 4. Try user profile temp
+            user_profile = os.environ.get("USERPROFILE", "")
+            if user_profile:
+                cache_paths.append(os.path.join(user_profile, "AppData", "Local", "Temp", "gen_py"))
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_paths = []
+            for p in cache_paths:
+                if p and p not in seen:
+                    seen.add(p)
+                    unique_paths.append(p)
+            
+            # Clear each cache location
+            for gen_py_path in unique_paths:
+                if os.path.exists(gen_py_path):
+                    try:
+                        logger.info(f"Clearing COM cache at {gen_py_path}")
+                        shutil.rmtree(gen_py_path)
+                    except Exception as e:
+                        logger.warning(f"Could not clear cache at {gen_py_path}: {e}")
+                        
         except Exception as e:
             logger.warning(f"Failed to clear COM cache: {e}")
 
