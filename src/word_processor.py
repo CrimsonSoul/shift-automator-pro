@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+import subprocess
 from datetime import date
 from pathlib import Path
 from typing import Optional, Any, Tuple, Callable
@@ -38,6 +39,7 @@ from .constants import (
     COM_ERROR_RPC_CALL_REJECTED,
     COM_ERROR_RPC_SERVERCALL_RETRYLATER,
     COM_ERROR_DISP_E_EXCEPTION,
+    COM_ERROR_DISP_E_BADINDEX,
     PRINTER_STATUS_OFFLINE,
     PRINTER_STATUS_ERROR
 )
@@ -117,30 +119,59 @@ class WordProcessor:
             logger.warning(f"Standard Word initialization failed: {e}")
             if self._is_cache_error(e):
                 self._clear_com_cache()
+                self._kill_word_processes()
 
         # 2. DispatchEx (Force new instance)
         try:
             logger.info("Attempting DispatchEx...")
-            return win32com.client.DispatchEx("Word.Application")
+            app = win32com.client.DispatchEx("Word.Application")
+            # Stabilization delay
+            time.sleep(1.0)
+            return app
         except Exception as e:
             logger.warning(f"Forceful Word initialization (DispatchEx) failed: {e}")
             if self._is_cache_error(e):
                 self._clear_com_cache()
+                self._kill_word_processes()
 
         # 3. Dynamic Dispatch (Bypasses the static gen_py cache)
         try:
             logger.info("Attempting dynamic Dispatch...")
-            return win32com.client.dynamic.Dispatch("Word.Application")
+            app = win32com.client.dynamic.Dispatch("Word.Application")
+            # Stabilization delay
+            time.sleep(1.0)
+            return app
         except Exception as e:
             logger.error(f"Dynamic Word initialization failed: {e}")
 
         return None
 
     def _is_cache_error(self, e: Exception) -> bool:
-        """Check if the error might be caused by a corrupted COM cache."""
+        """Check if the error might be caused by a corrupted COM cache or zombie process."""
         error_str = str(e).lower()
         return (COM_ERROR_DISP_E_EXCEPTION.lower() in error_str or 
-                "-2147352567" in error_str)
+                "-2147352567" in error_str or
+                COM_ERROR_DISP_E_BADINDEX.lower() in error_str or
+                "-2147352565" in error_str)
+
+    def _kill_word_processes(self) -> None:
+        """Forcefully terminate any existing Word processes to ensure a clean slate."""
+        if sys.platform != "win32":
+            return
+            
+        try:
+            logger.info("Performing Clean Slate: Terminating existing Word processes...")
+            # Use taskkill to forcefully (/F) terminate all processes named WINWORD.EXE
+            # redirecting output to NULL to keep logs clean unless there is an error
+            subprocess.call(
+                ["taskkill", "/F", "/IM", "WINWORD.EXE", "/T"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Give Windows a moment to actually release the resources
+            time.sleep(2.0)
+        except Exception as e:
+            logger.warning(f"Failed to execute taskkill: {e}")
 
     def _clear_com_cache(self) -> None:
         """Clear the win32com gen_py cache to resolve corruption issues."""
