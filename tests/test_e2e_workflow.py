@@ -57,6 +57,7 @@ def test_workflow_partial_failure(mock_wp: MockWordProcessor, mock_ui: MockUI):
     
     # Make one shift fail
     def fail_on_night(folder, template_name, current_date, printer_name):
+        mock_wp.call_count += 1
         if "night" in template_name.lower():
             return False, "File not found"
         return True, None
@@ -90,8 +91,8 @@ def test_workflow_cancellation(mock_wp: MockWordProcessor, mock_ui: MockUI):
     mock_ui.set_printer("TestPrinter")
     
     # Trigger cancellation after first print
-    original_print = mock_wp.print_document
-    def cancel_after_one(*args, **kwargs):
+    def cancel_after_one(folder, template_name, current_date, printer_name):
+        mock_wp.call_count += 1
         app._cancel_requested = True
         return True, None
         
