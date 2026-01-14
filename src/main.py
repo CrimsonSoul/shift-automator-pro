@@ -337,8 +337,6 @@ class ShiftAutomatorApp:
 
         cancelled = False
         # processed_days tracking: counts fully or partially completed days
-        # - If cancelled before processing day i: processed_days = i (i days completed)
-        # - If cancelled after day shift of day i: processed_days = i+1 (day i partially done)
         processed_days = 0
         progress = 0.0  # Initialize progress for early cancellation case
         try:
@@ -425,11 +423,16 @@ class ShiftAutomatorApp:
                         ))
 
         except Exception as e:
+            # Capture full exception details
+            error_type = type(e).__name__
+            error_msg = str(e)
+            full_error = f"{error_type}: {error_msg}"
+            
             logger.exception("Error during batch processing")
-            self.root.after(0, lambda: self.ui.log(f"FATAL ERROR: {str(e)}"))
-            self.root.after(0, lambda: self.ui.show_error(
+            self.root.after(0, lambda err=full_error: self.ui.log(f"FATAL ERROR: {err}"))
+            self.root.after(0, lambda err=full_error: self.ui.show_error(
                 "Processing Error",
-                f"An error occurred during processing: {str(e)}"
+                f"An error occurred during processing:\n\n{err}"
             ))
         finally:
             # Re-enable buttons

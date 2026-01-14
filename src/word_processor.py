@@ -82,7 +82,15 @@ class WordProcessor:
 
         com_initialized = False
         try:
-            pythoncom.CoInitialize()  # type: ignore
+            # Explicitly initialize COM with Apartment Threading (STA)
+            # This is the most reliable mode for Office automation
+            try:
+                logger.debug("Attempting CoInitializeEx(COINIT_APARTMENTTHREADED)...")
+                pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+            except Exception as e:
+                logger.debug(f"CoInitializeEx failed, falling back to CoInitialize: {e}")
+                pythoncom.CoInitialize()  # type: ignore
+                
             com_initialized = True
             self._thread_id = threading.get_ident()  # Record which thread initialized COM
             
@@ -106,8 +114,10 @@ class WordProcessor:
                     pythoncom.CoUninitialize()
                 except Exception as cleanup_error:
                     logger.warning(f"Error during COM cleanup after failed initialization: {cleanup_error}")
-            logger.error(f"Failed to initialize Word application: {e}")
-            raise RuntimeError(f"Could not initialize Word: {e}") from e
+            
+            error_details = f"{type(e).__name__}: {str(e)}"
+            logger.error(f"Failed to initialize Word application: {error_details}")
+            raise RuntimeError(f"Could not initialize Word: {error_details}") from e
 
     def _try_dispatch(self) -> Any:
         """
