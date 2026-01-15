@@ -636,11 +636,13 @@ class WordProcessor:
                 last_error = e
                 error_str = str(e).lower()
                 # "Call was rejected by callee" is a common transient COM error
+                # 0x800a175d: Could not open macro storage (often transient file lock or corruption)
                 if ("rejected" in error_str or
                     COM_ERROR_RPC_SERVERCALL_RETRYLATER.lower() in error_str or
-                    COM_ERROR_RPC_CALL_REJECTED.lower() in error_str):
+                    COM_ERROR_RPC_CALL_REJECTED.lower() in error_str or
+                    "800a175d" in error_str):
                     if attempt < max_attempts - 1:
-                        logger.debug(f"COM call rejected, retrying ({attempt + 1}/{max_attempts}) in {delay}s...")
+                        logger.debug(f"COM call rejected/failed, retrying ({attempt + 1}/{max_attempts}) in {delay}s...")
                         time.sleep(delay)
                         continue
 
@@ -830,8 +832,13 @@ class WordProcessor:
             return True, None
 
         except Exception as e:
+            error_msg = str(e)
+            if "800a175d" in error_msg.lower():
+                logger.error(f"Template file appears corrupt or locked: {target_file}")
+                return False, f"Error opening template: File may be corrupt or open in another process. ({e})"
+            
             logger.error(f"Error printing document {target_file}: {e}")
-            return False, str(e)
+            return False, error_msg
 
         finally:
             # Ensure document is closed (use simple call to avoid masking original error)
