@@ -98,6 +98,10 @@ TRANSIENT_ERROR_KEYWORDS: Final = (
 CONFIG_DEBOUNCE_DELAY: Final = 1.0  # seconds - delay before saving config
 
 
+# Printer status check caching
+PRINTER_STATUS_CACHE_TTL: Final = 30  # seconds
+
+
 @dataclass(frozen=True)
 class Colors:
     """Color scheme constants for the application UI (Relay Design System)."""

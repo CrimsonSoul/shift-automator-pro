@@ -12,7 +12,7 @@ import time
 import subprocess
 from datetime import date
 from pathlib import Path
-from typing import Optional, Any, Tuple, Callable
+from typing import Optional, Any, Tuple, Callable, Dict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # Platform-specific imports
@@ -44,6 +44,7 @@ from .constants import (
     PRINTER_STATUS_OFFLINE,
     PRINTER_STATUS_ERROR,
     PRINTER_STATUS_TIMEOUT,
+    PRINTER_STATUS_CACHE_TTL,
     COM_INIT_MAX_RETRIES_PER_METHOD,
     COM_INIT_CACHE_CLEAR_DELAY,
     COM_INIT_PROCESS_KILL_DELAY,
@@ -67,6 +68,8 @@ class WordProcessor:
         self.word_app: Optional[Any] = None
         self._initialized = False
         self._thread_id: Optional[int] = None  # Track which thread initialized COM
+        # Cache for printer status: {printer_name: (timestamp, is_ready, error)}
+        self._printer_status_cache: Dict[str, Tuple[float, bool, Optional[str]]] = {}
 
     def initialize(self) -> None:
         """
@@ -668,6 +671,13 @@ class WordProcessor:
         Returns:
             Tuple of (is_ready, error_message)
         """
+        # Check cache first
+        if printer_name in self._printer_status_cache:
+            timestamp, cached_status, cached_error = self._printer_status_cache[printer_name]
+            if time.time() - timestamp < PRINTER_STATUS_CACHE_TTL:
+                logger.debug(f"Using cached printer status for '{printer_name}'")
+                return cached_status, cached_error
+
         def _do_check():
             phandle = win32print.OpenPrinter(printer_name)
             try:
@@ -681,16 +691,23 @@ class WordProcessor:
             finally:
                 win32print.ClosePrinter(phandle)
 
+        result_status, result_error = True, None
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(_do_check)
-                return future.result(timeout=PRINTER_STATUS_TIMEOUT)
+                result_status, result_error = future.result(timeout=PRINTER_STATUS_TIMEOUT)
         except FuturesTimeoutError:
             logger.warning(f"Printer status check timed out for '{printer_name}'")
-            return True, None
+            # Default to success on timeout to avoid blocking
+            result_status, result_error = True, None
         except Exception as e:
             logger.warning(f"Could not verify printer status for '{printer_name}': {e}")
-            return True, None
+            # Default to success on error (fail open)
+            result_status, result_error = True, None
+
+        # Update cache
+        self._printer_status_cache[printer_name] = (time.time(), result_status, result_error)
+        return result_status, result_error
 
     def find_template_file(self, folder: str, template_name: str) -> Optional[str]:
         """
