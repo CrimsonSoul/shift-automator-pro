@@ -6,6 +6,7 @@ like third Thursday detection.
 """
 
 import calendar
+import functools
 from datetime import date, timedelta
 from typing import Optional
 
@@ -13,6 +14,27 @@ from .constants import THURSDAY
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@functools.lru_cache(maxsize=None)
+def get_third_thursday(year: int, month: int) -> Optional[int]:
+    """
+    Get the day of the third Thursday in the specified month and year.
+    Cached to improve performance.
+
+    Args:
+        year: The year
+        month: The month (1-12)
+
+    Returns:
+        The day of the month that is the third Thursday, or None if not found.
+    """
+    month_calendar = calendar.monthcalendar(year, month)
+    thursdays = [week[THURSDAY] for week in month_calendar if week[THURSDAY] != 0]
+
+    if len(thursdays) >= 3:
+        return thursdays[2]
+    return None
 
 
 def is_third_thursday(dt: date) -> bool:
@@ -34,13 +56,11 @@ def is_third_thursday(dt: date) -> bool:
     if dt.weekday() != THURSDAY:
         return False
 
-    # Get all Thursdays in the month
-    month_calendar = calendar.monthcalendar(dt.year, dt.month)
-    thursdays = [week[THURSDAY] for week in month_calendar if week[THURSDAY] != 0]
+    third_thursday = get_third_thursday(dt.year, dt.month)
 
     # Check if this is the third Thursday
-    if len(thursdays) >= 3:
-        is_third = dt.day == thursdays[2]
+    if third_thursday is not None:
+        is_third = dt.day == third_thursday
         logger.debug(f"Date {dt} is third Thursday: {is_third}")
         return is_third
 

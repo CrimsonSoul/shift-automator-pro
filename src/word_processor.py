@@ -81,6 +81,9 @@ class WordProcessor:
         if self._initialized:
             return
 
+        # Clear folder cache to ensure a clean state
+        self._folder_cache = {}
+
         if not HAS_PYWIN32 or pythoncom is None:
             raise RuntimeError(
                 "This application requires Windows with pywin32 installed. "
@@ -575,6 +578,9 @@ class WordProcessor:
 
     def shutdown(self) -> None:
         """Shutdown the Word application instance."""
+        # Clear cache to free memory
+        self._folder_cache = {}
+
         if not self.word_app:
             return
 
@@ -729,7 +735,12 @@ class WordProcessor:
             return None
 
         try:
-            files = os.listdir(folder)
+            # Use cached file list if available to avoid repetitive I/O
+            if folder in self._folder_cache:
+                files = self._folder_cache[folder]
+            else:
+                files = os.listdir(folder)
+                self._folder_cache[folder] = files
 
             # Construct expected filename
             expected_filename = f"{template_name}{DOCX_EXTENSION}"
