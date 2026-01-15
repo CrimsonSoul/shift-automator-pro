@@ -5,7 +5,7 @@ Unit tests for scheduler module.
 import pytest
 from datetime import date
 
-from src.scheduler import is_third_thursday, get_shift_template_name, validate_date_range, get_date_range
+from src.scheduler import is_third_thursday, get_shift_template_name, validate_date_range, get_date_range, get_third_thursday
 
 
 class TestIsThirdThursday:
@@ -34,6 +34,33 @@ class TestIsThirdThursday:
     def test_third_thursday_march_2026(self):
         """March 19, 2026 is the third Thursday."""
         assert is_third_thursday(date(2026, 3, 19)) is True
+
+
+class TestGetThirdThursdayCaching:
+    """Tests for get_third_thursday caching behavior."""
+
+    def test_caching_behavior(self):
+        """Test that get_third_thursday is cached."""
+        # Clear cache to ensure we start fresh
+        get_third_thursday.cache_clear()
+
+        # First call should result in a miss
+        get_third_thursday(2026, 1)
+        info = get_third_thursday.cache_info()
+        assert info.misses == 1
+        assert info.hits == 0
+
+        # Second call with same arguments should result in a hit
+        get_third_thursday(2026, 1)
+        info = get_third_thursday.cache_info()
+        assert info.misses == 1
+        assert info.hits == 1
+
+        # Call with different arguments should result in a miss
+        get_third_thursday(2026, 2)
+        info = get_third_thursday.cache_info()
+        assert info.misses == 2
+        assert info.hits == 1
 
 
 class TestGetShiftTemplateName:
