@@ -484,3 +484,32 @@ class TestWordProcessorIntegration:
 
             assert is_ready is True
             assert error is None
+
+    @patch('src.word_processor.time.sleep')
+    @patch('src.word_processor.pythoncom')
+    @patch('src.word_processor.win32com.client')
+    @patch('src.word_processor.win32print')
+    def test_printer_status_caching(self, mock_win32print, mock_win32, mock_pythoncom, mock_sleep):
+        """Test that printer status checks are cached."""
+        # Mock printer status
+        mock_win32print.OpenPrinter.return_value = 1
+        mock_win32print.GetPrinter.return_value = {'Status': 0}
+
+        mock_word_app = MagicMock()
+        create_word_mocks(mock_win32, mock_word_app)
+
+        with patch.object(WordProcessor, '_perform_preflight_cleanup'):
+            processor = WordProcessor()
+            processor.initialize()
+
+            # First check - should hit the "printer" (mock)
+            processor._check_printer_status("Test Printer")
+            assert mock_win32print.OpenPrinter.call_count == 1
+
+            # Second check immediately after - should use cache
+            processor._check_printer_status("Test Printer")
+            assert mock_win32print.OpenPrinter.call_count == 1
+
+            # Check a different printer - should hit the printer
+            processor._check_printer_status("Other Printer")
+            assert mock_win32print.OpenPrinter.call_count == 2
