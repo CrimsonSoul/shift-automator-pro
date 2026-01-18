@@ -904,20 +904,26 @@ class WordProcessor:
         self._execute_replace(doc, DATE_PLACEHOLDER, placeholder_text, is_wildcard=False)
 
         # 2. Fallback: Pattern matching (RISKIER - matches existing dates)
-        # Note: We use specific patterns with day/month names to reduce false positives
-        # Build pattern that matches actual day and month names
-        day_names = "(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)"
-        month_names = "(January|February|March|April|May|June|July|August|September|October|November|December)"
+        # Note: We use valid MS Word wildcards.
+        # Word does NOT support regex alternation (|) in wildcards.
+        # Instead, we use generic word matching: <[A-Z][a-z]@> matches a Capitalized word.
+        
+        # Pattern components for Word Wildcards:
+        # <[A-Z][a-z]@>  : Matches a word starting with uppercase followed by lowercase letters (e.g. "Monday", "January")
+        # [0-9]{1,2}     : Matches 1 or 2 digits
+        # [0-9]{4}       : Matches 4 digits
 
         patterns = [
             # Style 1: "Sunday, January 04, 2026" (with comma after day)
+            # Pattern: Word, Word Digits, Digits
             (
-                f"{day_names}, {month_names} [0-9]{{1,2}}, [0-9]{{4}}",
+                "<[A-Z][a-z]@>, <[A-Z][a-z]@> [0-9]{1,2}, [0-9]{4}",
                 f"{new_day}, {new_month} {new_day_num}, {new_year}"
             ),
             # Style 2: "Saturday January 03, 2026" (no comma after day)
+            # Pattern: Word Word Digits, Digits
             (
-                f"{day_names} {month_names} [0-9]{{1,2}}, [0-9]{{4}}",
+                "<[A-Z][a-z]@> <[A-Z][a-z]@> [0-9]{1,2}, [0-9]{4}",
                 f"{new_day} {new_month} {new_day_num}, {new_year}"
             ),
         ]
