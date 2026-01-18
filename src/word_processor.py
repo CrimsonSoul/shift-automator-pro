@@ -70,6 +70,8 @@ class WordProcessor:
         self._thread_id: Optional[int] = None  # Track which thread initialized COM
         # Cache for printer status: {printer_name: (timestamp, is_ready, error)}
         self._printer_status_cache: Dict[str, Tuple[float, bool, Optional[str]]] = {}
+        # Cache for folder listings to improve performance
+        self._folder_cache: Dict[str, List[str]] = {}
 
     def initialize(self) -> None:
         """
