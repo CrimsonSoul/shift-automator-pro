@@ -15,7 +15,10 @@ def test_ui_initialization(root):
     """Test that UI components are created correctly."""
     ui = ScheduleAppUI(root)
     # Check if title was called on root
-    root.title.assert_called_with("Shift Automator")
+    if isinstance(root, MagicMock):
+        root.title.assert_called_with("Shift Automator")
+    else:
+        assert root.title() == "Shift Automator"
         
     assert ui.day_entry is not None
     assert ui.night_entry is not None

@@ -1,6 +1,6 @@
 # Runtime dependencies for Shift Automator
 # These are required for the application to run
 
-pywin32==306
+pywin32==311
 tkcalendar==1.6.1
 babel==2.16.0
