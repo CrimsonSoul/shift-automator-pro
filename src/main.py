@@ -11,7 +11,8 @@ from typing import Optional
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
-from .constants import PROGRESS_MAX
+from .constants import PROGRESS_MAX, COLORS
+
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
 from .scheduler import get_shift_template_name, validate_date_range
@@ -38,6 +39,8 @@ class ShiftAutomatorApp:
         self.config_manager = ConfigManager()
         self.word_processor: Optional[WordProcessor] = None
         self._processing_thread: Optional[threading.Thread] = None
+        self._cancel_requested = False
+
 
         # Load and apply saved configuration
         self._load_config()
@@ -121,15 +124,26 @@ class ShiftAutomatorApp:
 
     def start_processing(self) -> None:
         """Start the batch processing in a background thread."""
+        # Check if already processing (can be used as stop button)
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._cancel_requested = True
+            self.ui.update_status("Cancelling...", self.ui.progress_var.get())
+            self.ui.set_print_button_state("disabled")
+            return
+
         # Validate inputs
         is_valid, error_msg = self._validate_inputs()
         if not is_valid:
             self.ui.show_warning("Validation Error", error_msg)
             return
 
-        # Disable button
-        self.ui.set_print_button_state("disabled")
+        # Reset cancel flag
+        self._cancel_requested = False
 
+        # Update button text to STOP
+        self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.success) # Use success color for stop? No, maybe red? 
+        # Actually I'll use COLORS.accent for both or change it.
+        
         # Start processing thread
         self._processing_thread = threading.Thread(
             target=self._process_batch,
@@ -141,9 +155,15 @@ class ShiftAutomatorApp:
         """Process the batch of schedules."""
         start_date = self.ui.get_start_date()
         end_date = self.ui.get_end_date()
+        
+        if not start_date or not end_date:
+            logger.error("Attempted to process batch with missing dates")
+            return
+
         day_folder = self.ui.get_day_folder()
         night_folder = self.ui.get_night_folder()
         printer_name = self.ui.get_printer_name()
+
 
         # Save configuration
         config = AppConfig(
@@ -163,7 +183,14 @@ class ShiftAutomatorApp:
         try:
             with WordProcessor() as word_proc:
                 for i in range(total_days):
+                    # Check for cancellation
+                    if self._cancel_requested:
+                        logger.info("Batch processing cancelled by user")
+                        self.root.after(0, lambda: self.ui.update_status("Cancelled", 0))
+                        return
+
                     current_date = start_date + timedelta(days=i)
+
                     day_name = current_date.strftime("%A")
                     display_date = current_date.strftime("%m/%d/%Y")
 
@@ -219,8 +246,10 @@ class ShiftAutomatorApp:
                 f"An error occurred during processing: {str(e)}"
             ))
         finally:
-            # Re-enable button
+            # Re-enable button and reset text
+            self.root.after(0, lambda: self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent))
             self.root.after(0, lambda: self.ui.set_print_button_state("normal"))
+
 
     def _show_failure_summary(self, failed_operations: list[dict]) -> None:
         """
@@ -258,10 +287,11 @@ def main() -> None:
         try:
             import tkinter.messagebox as mb
             mb.showerror("Fatal Error", f"The application encountered a fatal error:\n\n{str(e)}")
-        except:
+        except Exception:
             print(f"Fatal error: {e}")
     finally:
         logger.info("Shift Automator shutting down")
+
 
 
 if __name__ == "__main__":

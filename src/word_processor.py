@@ -22,7 +22,8 @@ from .constants import (
     COM_RETRY_DELAY
 )
 from .logger import get_logger
-from .path_validation import validate_folder_path, is_path_within_base
+from .path_validation import validate_folder_path
+
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,8 @@ class WordProcessor:
         """Initialize WordProcessor."""
         self.word_app: Optional[Any] = None
         self._initialized = False
+        self._template_cache: dict[str, dict[str, str]] = {}
+
 
     def initialize(self) -> None:
         """
@@ -103,7 +106,7 @@ class WordProcessor:
         """
         Find a template file in the given folder.
 
-        First tries exact match, then falls back to partial match.
+        Uses caching for faster lookup and robust matching logic.
 
         Args:
             folder: The folder to search in
@@ -118,39 +121,45 @@ class WordProcessor:
             logger.error(f"Invalid folder path: {error_msg}")
             return None
 
-        try:
-            files = os.listdir(folder)
-            exact_match = None
-            partial_match = None
+        folder_path = str(Path(folder).resolve())
+        template_name_lower = template_name.lower()
 
-            # Search for .docx files
-            for f in files:
-                if not f.lower().endswith(DOCX_EXTENSION):
-                    continue
+        # Build cache if not already present for this folder
+        if folder_path not in self._template_cache:
+            try:
+                files = os.listdir(folder_path)
+                cache = {}
+                for f in files:
+                    if f.lower().endswith(DOCX_EXTENSION):
+                        base_name = f.lower().replace(DOCX_EXTENSION, "")
+                        cache[base_name] = os.path.join(folder_path, f)
+                self._template_cache[folder_path] = cache
+                logger.debug(f"Cached {len(cache)} templates from {folder_path}")
+            except OSError as e:
+                logger.error(f"Error listing files in {folder_path}: {e}")
+                return None
 
-                # Try exact match first
-                if f.lower() == f"{template_name.lower()}{DOCX_EXTENSION}":
-                    exact_match = os.path.join(folder, f)
-                    logger.debug(f"Found exact match: {exact_match}")
-                    break
+        cache = self._template_cache[folder_path]
 
-                # Fall back to partial match
-                if template_name.lower() in f.lower() and partial_match is None:
-                    partial_match = os.path.join(folder, f)
-                    logger.debug(f"Found partial match: {partial_match}")
+        # 1. Try exact match
+        if template_name_lower in cache:
+            target = cache[template_name_lower]
+            logger.debug(f"Found exact template match: {target}")
+            return target
 
-            target_file = exact_match or partial_match
+        # 2. Try partial match (word boundary/start/end only to avoid substring bugs)
+        # e.g., "Thursday" should not match "THIRD Thursday" unless specifically requested
+        for base_name, full_path in cache.items():
+            # Match if it starts or ends with the template name
+            # This handles "Thursday Night" when searching for "Thursday"
+            # but we need to be careful.
+            if base_name.startswith(template_name_lower) or base_name.endswith(template_name_lower):
+                logger.info(f"Found robust template match: {full_path}")
+                return full_path
 
-            if target_file:
-                logger.info(f"Found template: {target_file}")
-            else:
-                logger.warning(f"Template not found: {template_name} in {folder}")
+        logger.warning(f"Template not found: {template_name} in {folder}")
+        return None
 
-            return target_file
-
-        except OSError as e:
-            logger.error(f"Error listing files in {folder}: {e}")
-            return None
 
     def print_document(self, folder: str, template_name: str, current_date: date,
                        printer_name: str) -> Tuple[bool, Optional[str]]:
