@@ -13,7 +13,6 @@ from typing import Optional, Callable, Literal, Union
 
 import win32print
 
-
 from .constants import (
     COLORS, FONTS,
     WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RESIZABLE,
@@ -55,6 +54,7 @@ class ScheduleAppUI:
         self.status_label: Optional[ttk.Label] = None
         self.progress_var: Optional[tk.DoubleVar] = None
         self.progress: Optional[ttk.Progressbar] = None
+        self.printer_dropdown: Optional[ttk.OptionMenu] = None
         self.print_btn: Optional[tk.Button] = None
 
         # Create widgets
@@ -143,7 +143,6 @@ class ScheduleAppUI:
 
     def _create_date_range_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the date range selection row."""
-
         range_row = ttk.Frame(parent)
         range_row.pack(fill="x", pady=(0, 20))
 
@@ -165,7 +164,6 @@ class ScheduleAppUI:
 
     def _create_printer_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the printer selection row."""
-
         output_row = ttk.Frame(parent)
         output_row.pack(fill="x")
         ttk.Label(output_row, text="TARGET PRINTER", style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
@@ -271,7 +269,6 @@ class ScheduleAppUI:
     def get_end_date(self) -> Optional[date]:
         """Get the end date."""
         return self.end_date_picker.get_date() if self.end_date_picker else None
-
 
     def set_start_command(self, command: Callable[[], None]) -> None:
         """
