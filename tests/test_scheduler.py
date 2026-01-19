@@ -35,6 +35,15 @@ class TestIsThirdThursday:
         """March 19, 2026 is the third Thursday."""
         assert is_third_thursday(date(2026, 3, 19)) is True
 
+    def test_third_thursday_may_2026(self):
+        """May 21, 2026 is the third Thursday."""
+        assert is_third_thursday(date(2026, 5, 21)) is True
+
+    def test_second_thursday_may_2026(self):
+        """May 14, 2026 is the second Thursday."""
+        assert is_third_thursday(date(2026, 5, 14)) is False
+
+
 
 class TestGetShiftTemplateName:
     """Tests for get_shift_template_name function."""

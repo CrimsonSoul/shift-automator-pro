@@ -5,8 +5,8 @@ This module handles date calculations, including special scheduling rules
 like third Thursday detection.
 """
 
-import calendar
 from datetime import date, timedelta
+
 from typing import Optional
 
 from .constants import THURSDAY
@@ -34,17 +34,11 @@ def is_third_thursday(dt: date) -> bool:
     if dt.weekday() != THURSDAY:
         return False
 
-    # Get all Thursdays in the month
-    month_calendar = calendar.monthcalendar(dt.year, dt.month)
-    thursdays = [week[THURSDAY] for week in month_calendar if week[THURSDAY] != 0]
+    # The third occurrence of any weekday always falls between the 15th and 21st
+    is_third = 15 <= dt.day <= 21
+    logger.debug(f"Date {dt} is third Thursday: {is_third}")
+    return is_third
 
-    # Check if this is the third Thursday
-    if len(thursdays) >= 3:
-        is_third = dt.day == thursdays[2]
-        logger.debug(f"Date {dt} is third Thursday: {is_third}")
-        return is_third
-
-    return False
 
 
 def get_shift_template_name(dt: date, shift_type: str = "day") -> str:
