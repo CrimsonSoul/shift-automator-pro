@@ -138,3 +138,11 @@ class TestGetDateRange:
         end = date(2026, 1, 1)
         with pytest.raises(ValueError, match="End date cannot be before start date"):
             get_date_range(start, end)
+
+    def test_range_too_large_raises_error(self):
+        """Range exceeding MAX_DAYS_RANGE should raise ValueError."""
+        start = date(2026, 1, 1)
+        end = date(2027, 1, 2) # 367 days
+        with pytest.raises(ValueError, match="Date range exceeds maximum allowed"):
+            get_date_range(start, end)
+

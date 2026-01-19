@@ -7,9 +7,10 @@ including document opening, date replacement, and printing.
 
 import os
 import time
+import re
 from datetime import date
 from pathlib import Path
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Callable
 
 import pythoncom
 import win32com.client
@@ -33,10 +34,9 @@ class WordProcessor:
 
     def __init__(self):
         """Initialize WordProcessor."""
-        self.word_app: Optional[Any] = None
+        self.word_app = None
         self._initialized = False
         self._template_cache: dict[str, dict[str, str]] = {}
-
 
     def initialize(self) -> None:
         """
@@ -45,14 +45,15 @@ class WordProcessor:
         Raises:
             RuntimeError: If Word cannot be initialized
         """
-        if self._initialized:
+        if self._initialized and self.word_app:
             return
 
         try:
             pythoncom.CoInitialize()
             self.word_app = win32com.client.Dispatch("Word.Application")
-            self.word_app.Visible = False
-            self.word_app.DisplayAlerts = 0
+            if self.word_app:
+                self.word_app.Visible = False
+                self.word_app.DisplayAlerts = 0
             self._initialized = True
             logger.info("Word application initialized")
         except Exception as e:
@@ -70,9 +71,27 @@ class WordProcessor:
             finally:
                 self.word_app = None
                 self._initialized = False
-                pythoncom.CoUninitialize()
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
-    def safe_com_call(self, func: callable, *args: Any, retries: int = COM_RETRIES,
+    def clear_template_cache(self, folder: Optional[str] = None) -> None:
+        """
+        Clear the template cache.
+
+        Args:
+            folder: Specific folder to clear, or None to clear all
+        """
+        if folder:
+            folder_path = str(Path(folder).resolve())
+            self._template_cache.pop(folder_path, None)
+            logger.debug(f"Cleared template cache for: {folder_path}")
+        else:
+            self._template_cache.clear()
+            logger.debug("Cleared all template caches")
+
+    def safe_com_call(self, func: Callable[..., Any], *args: Any, retries: int = COM_RETRIES,
                       delay: float = COM_RETRY_DELAY) -> Any:
         """
         Execute a COM call with retry logic for transient errors.
@@ -147,15 +166,32 @@ class WordProcessor:
             logger.debug(f"Found exact template match: {target}")
             return target
 
-        # 2. Try partial match (word boundary/start/end only to avoid substring bugs)
-        # e.g., "Thursday" should not match "THIRD Thursday" unless specifically requested
+        # 2. Try robust matching using word boundaries
+        # This prevents "Thursday" matching "THIRD Thursday" 
+        # but allows "Thursday" matching "Thursday Night" if it's the only match
+        pattern = re.compile(rf"\b{re.escape(template_name_lower)}\b")
+        
+        matches = []
         for base_name, full_path in cache.items():
-            # Match if it starts or ends with the template name
-            # This handles "Thursday Night" when searching for "Thursday"
-            # but we need to be careful.
-            if base_name.startswith(template_name_lower) or base_name.endswith(template_name_lower):
-                logger.info(f"Found robust template match: {full_path}")
-                return full_path
+            if pattern.search(base_name):
+                # Special logic: if search term doesn't have "third" but filename does, skip
+                # This prevents "Thursday" matching "THIRD Thursday"
+                if "third" not in template_name_lower and "third" in base_name:
+                    continue
+                matches.append(full_path)
+
+        if len(matches) == 1:
+            logger.info(f"Found robust template match: {matches[0]}")
+            return matches[0]
+        elif len(matches) > 1:
+            # If multiple matches, try to find the one that starts with it (more specific)
+            for m in matches:
+                if Path(m).stem.lower().startswith(template_name_lower):
+                    logger.info(f"Found specific template match from multiple: {m}")
+                    return m
+            
+            logger.warning(f"Ambiguous template matches for '{template_name}': {matches}")
+            return matches[0] # Fallback to first
 
         logger.warning(f"Template not found: {template_name} in {folder}")
         return None
@@ -175,7 +211,7 @@ class WordProcessor:
         Returns:
             Tuple of (success, error_message)
         """
-        if not self._initialized:
+        if not self._initialized or not self.word_app:
             return False, "Word processor not initialized"
 
         # Find the template file
@@ -204,9 +240,13 @@ class WordProcessor:
             self.replace_dates(doc, current_date)
 
             # Set printer and print
-            self.word_app.ActivePrinter = printer_name
+            if self.word_app:
+                self.word_app.ActivePrinter = printer_name
             logger.debug(f"Printing to: {printer_name}")
-            self.safe_com_call(doc.PrintOut, Background=False)
+            # PrintOut(Background, Append, Range, OutputFileName, From, To, Item, Copies, ...)
+            # Background=False ensures synchronous printing
+            self.safe_com_call(doc.PrintOut, False)
+
 
             # Close document
             self.safe_com_call(doc.Close, CLOSE_NO_SAVE)

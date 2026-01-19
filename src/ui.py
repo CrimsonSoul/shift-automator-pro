@@ -9,9 +9,10 @@ from tkinter import messagebox, filedialog, ttk
 from datetime import date
 from tkcalendar import DateEntry
 
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal, Union
 
 import win32print
+
 
 from .constants import (
     COLORS, FONTS,
@@ -140,8 +141,9 @@ class ScheduleAppUI:
         # Printer Selection Row
         self._create_printer_row(control_card)
 
-    def _create_date_range_row(self, parent: ttk.Frame) -> None:
+    def _create_date_range_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the date range selection row."""
+
         range_row = ttk.Frame(parent)
         range_row.pack(fill="x", pady=(0, 20))
 
@@ -161,8 +163,9 @@ class ScheduleAppUI:
                                         foreground='white', borderwidth=0)
         self.end_date_picker.pack(fill="x")
 
-    def _create_printer_row(self, parent: ttk.Frame) -> None:
+    def _create_printer_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the printer selection row."""
+
         output_row = ttk.Frame(parent)
         output_row.pack(fill="x")
         ttk.Label(output_row, text="TARGET PRINTER", style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
@@ -208,7 +211,7 @@ class ScheduleAppUI:
         )
         self.print_btn.pack(fill="x")
 
-    def _create_path_row(self, parent: ttk.Frame, label: str, default_val: str) -> ttk.Entry:
+    def _create_path_row(self, parent: Union[ttk.Frame, ttk.LabelFrame], label: str, default_val: str) -> ttk.Entry:
         """
         Create a path input row with browse button.
 
@@ -280,7 +283,7 @@ class ScheduleAppUI:
         if self.print_btn:
             self.print_btn.config(command=command)
 
-    def set_print_button_state(self, state: str) -> None:
+    def set_print_button_state(self, state: Literal["normal", "disabled"]) -> None:
         """
         Set the print button state.
 

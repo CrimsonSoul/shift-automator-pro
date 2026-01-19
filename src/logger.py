@@ -11,9 +11,11 @@ from typing import Optional
 
 from .constants import LOG_FILENAME
 
+__all__ = ["setup_logging", "get_logger"]
+
 
 def setup_logging(
-    log_level: int = logging.INFO,
+    log_level: Optional[int] = None,
     log_dir: Optional[str] = None,
     log_filename: str = LOG_FILENAME
 ) -> logging.Logger:
@@ -21,13 +23,19 @@ def setup_logging(
     Set up logging configuration for the application.
 
     Args:
-        log_level: The logging level (default: logging.INFO)
+        log_level: The logging level (default: check DEBUG env or logging.INFO)
         log_dir: Directory for log files (default: current working directory)
         log_filename: Name of the log file
 
     Returns:
         Configured logger instance
     """
+    if log_level is None:
+        if os.environ.get("DEBUG") == "1" or os.environ.get("DEBUG", "").lower() == "true":
+            log_level = logging.DEBUG
+        else:
+            log_level = logging.INFO
+
     # Determine log file path
     if log_dir:
         log_path = Path(log_dir)

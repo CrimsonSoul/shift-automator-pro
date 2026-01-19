@@ -5,13 +5,13 @@ A high-performance desktop application for automating shift schedule printing.
 """
 
 import threading
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Optional
 
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
-from .constants import PROGRESS_MAX, COLORS
+from .constants import PROGRESS_MAX, COLORS, MAX_DAYS_RANGE
 
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
@@ -39,8 +39,7 @@ class ShiftAutomatorApp:
         self.config_manager = ConfigManager()
         self.word_processor: Optional[WordProcessor] = None
         self._processing_thread: Optional[threading.Thread] = None
-        self._cancel_requested = False
-
+        self._cancel_event = threading.Event()
 
         # Load and apply saved configuration
         self._load_config()
@@ -54,13 +53,13 @@ class ShiftAutomatorApp:
         """Load configuration and apply to UI."""
         try:
             config = self.config_manager.load()
-            if config.day_folder:
+            if config.day_folder and self.ui.day_entry:
                 self.ui.day_entry.delete(0, tk.END)
                 self.ui.day_entry.insert(0, config.day_folder)
-            if config.night_folder:
+            if config.night_folder and self.ui.night_entry:
                 self.ui.night_entry.delete(0, tk.END)
                 self.ui.night_entry.insert(0, config.night_folder)
-            if config.printer_name:
+            if config.printer_name and self.ui.printer_var:
                 self.ui.printer_var.set(config.printer_name)
             logger.info("Configuration loaded successfully")
         except Exception as e:
@@ -126,23 +125,24 @@ class ShiftAutomatorApp:
         """Start the batch processing in a background thread."""
         # Check if already processing (can be used as stop button)
         if self._processing_thread and self._processing_thread.is_alive():
-            self._cancel_requested = True
-            self.ui.update_status("Cancelling...", self.ui.progress_var.get())
+            self._cancel_event.set()
+            current_progress = self.ui.progress_var.get() if self.ui.progress_var else 0.0
+            self.ui.update_status("Cancelling...", current_progress)
             self.ui.set_print_button_state("disabled")
             return
 
         # Validate inputs
         is_valid, error_msg = self._validate_inputs()
         if not is_valid:
-            self.ui.show_warning("Validation Error", error_msg)
+            self.ui.show_warning("Validation Error", error_msg or "Unknown error")
             return
 
         # Reset cancel flag
-        self._cancel_requested = False
+        self._cancel_event.clear()
 
         # Update button text to STOP
-        self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.success) # Use success color for stop? No, maybe red? 
-        # Actually I'll use COLORS.accent for both or change it.
+        if self.ui.print_btn:
+            self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.error)
         
         # Start processing thread
         self._processing_thread = threading.Thread(
@@ -164,7 +164,6 @@ class ShiftAutomatorApp:
         night_folder = self.ui.get_night_folder()
         printer_name = self.ui.get_printer_name()
 
-
         # Save configuration
         config = AppConfig(
             day_folder=day_folder,
@@ -175,6 +174,15 @@ class ShiftAutomatorApp:
 
         # Calculate total days
         total_days = (end_date - start_date).days + 1
+        
+        # Validate max days
+        if total_days > MAX_DAYS_RANGE:
+            self.root.after(0, lambda: self.ui.show_warning(
+                "Range Too Large", 
+                f"Please select a range of {MAX_DAYS_RANGE} days or less (selected {total_days} days)."
+            ))
+            return
+
         logger.info(f"Processing {total_days} days from {start_date} to {end_date}")
 
         # Track failed operations
@@ -184,7 +192,7 @@ class ShiftAutomatorApp:
             with WordProcessor() as word_proc:
                 for i in range(total_days):
                     # Check for cancellation
-                    if self._cancel_requested:
+                    if self._cancel_event.is_set():
                         logger.info("Batch processing cancelled by user")
                         self.root.after(0, lambda: self.ui.update_status("Cancelled", 0))
                         return
@@ -232,7 +240,7 @@ class ShiftAutomatorApp:
 
                 # Show results
                 if failed_operations:
-                    self._show_failure_summary(failed_operations)
+                    self.root.after(0, lambda: self._show_failure_summary(failed_operations))
                 else:
                     self.root.after(0, lambda: self.ui.show_info(
                         "Success",
@@ -247,8 +255,12 @@ class ShiftAutomatorApp:
             ))
         finally:
             # Re-enable button and reset text
-            self.root.after(0, lambda: self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent))
-            self.root.after(0, lambda: self.ui.set_print_button_state("normal"))
+            def reset_ui():
+                if self.ui.print_btn:
+                    self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent)
+                self.ui.set_print_button_state("normal")
+            
+            self.root.after(0, reset_ui)
 
 
     def _show_failure_summary(self, failed_operations: list[dict]) -> None:

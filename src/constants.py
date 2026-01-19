@@ -8,6 +8,16 @@ to avoid magic numbers and strings.
 from dataclasses import dataclass
 from typing import Final
 
+__all__ = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY",
+           "PROTECTION_NONE", "PROTECTION_READ_ONLY", "PROTECTION_ALLOW_COMMENTS", "PROTECTION_ALLOW_REVISIONS",
+           "CLOSE_NO_SAVE", "CLOSE_SAVE", "CLOSE_PROMPT",
+           "PRINTER_ENUM_LOCAL", "PRINTER_ENUM_NETWORK",
+           "DOCX_EXTENSION", "CONFIG_FILENAME", "LOG_FILENAME",
+           "WINDOW_WIDTH", "WINDOW_HEIGHT", "WINDOW_RESIZABLE",
+           "PROGRESS_MAX", "MAX_DAYS_RANGE",
+           "COM_RETRIES", "COM_RETRY_DELAY",
+           "COLORS", "FONTS"]
+
 # Weekday constants (Python's datetime.weekday() returns 0=Monday, 6=Sunday)
 MONDAY: Final = 0
 TUESDAY: Final = 1
@@ -47,6 +57,9 @@ WINDOW_RESIZABLE: Final = False
 # Progress bar
 PROGRESS_MAX: Final = 100
 
+# Date validation
+MAX_DAYS_RANGE: Final = 365
+
 # Retry settings for COM calls
 COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
@@ -61,6 +74,7 @@ class Colors:
     text_main: str = "#FFFFFF"       # High contrast
     text_dim: str = "#71717A"        # Muted secondary
     success: str = "#10B981"         # Emerald
+    error: str = "#EF4444"           # Red/Danger
     border: str = "#27272A"          # Subtle border
     secondary: str = "#1E1E26"       # Button hover
     accent_hover: str = "#3A6DFF"    # Accent hover state

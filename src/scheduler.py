@@ -9,8 +9,10 @@ from datetime import date, timedelta
 
 from typing import Optional
 
-from .constants import THURSDAY
+from .constants import THURSDAY, MAX_DAYS_RANGE
 from .logger import get_logger
+
+__all__ = ["is_third_thursday", "get_shift_template_name", "validate_date_range", "get_date_range"]
 
 logger = get_logger(__name__)
 
@@ -111,4 +113,7 @@ def get_date_range(start_date: date, end_date: date) -> list[date]:
         raise ValueError(error_msg)
 
     delta = (end_date - start_date).days
+    if delta + 1 > MAX_DAYS_RANGE:
+        raise ValueError(f"Date range exceeds maximum allowed ({MAX_DAYS_RANGE} days)")
     return [start_date + timedelta(days=i) for i in range(delta + 1)]
+
