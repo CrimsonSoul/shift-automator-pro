@@ -85,13 +85,14 @@ class TestWordProcessor:
         """Should call find/replace with correct patterns."""
         mock_doc = MagicMock()
         current_date = date(2026, 1, 15) # Thursday
-        
-        with patch.object(wp, "_execute_replace") as mock_exec:
+
+        with patch.object(wp, "_normalize_spaces_in_doc"), \
+             patch.object(wp, "_execute_replace", return_value=True) as mock_exec:
             wp.replace_dates(mock_doc, current_date)
-            
-            # Should be called 3 times (for 3 patterns)
-            assert mock_exec.call_count == 3
-            
+
+            # Should be called 4 times (for 4 patterns)
+            assert mock_exec.call_count == 4
+
             # Verify one of the calls
             # Pattern: "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}"
             # Replacement: "Thursday, January 15, 2026"
@@ -138,6 +139,77 @@ class TestWordProcessor:
         (tmp_path / "Monday.docx").write_text("dummy")
         wp.find_template_file(str(tmp_path), "Monday")
         assert str(tmp_path.resolve()) in wp._template_cache
-        
+
         wp.clear_template_cache()
         assert wp._template_cache == {}
+
+    def test_find_template_third_thursday_extra_spaces(self, wp, tmp_path):
+        """Should find 'THIRD Thursday' even if filename has extra spaces."""
+        (tmp_path / "THIRD  Thursday.docx").write_text("dummy")
+
+        result = wp.find_template_file(str(tmp_path), "THIRD Thursday")
+        assert result is not None
+        assert "Thursday" in result
+
+    def test_third_thursday_integration(self, wp, tmp_path):
+        """Integration: scheduler template name should find the right file."""
+        from src.scheduler import get_shift_template_name
+
+        (tmp_path / "Thursday.docx").write_text("dummy")
+        (tmp_path / "THIRD Thursday.docx").write_text("dummy")
+
+        # January 15, 2026 is the third Thursday
+        template_name = get_shift_template_name(date(2026, 1, 15), "day")
+        assert template_name == "THIRD Thursday"
+
+        result = wp.find_template_file(str(tmp_path), template_name)
+        assert result is not None
+        assert "third" in Path(result).name.lower()
+
+    def test_replace_dates_no_match_warning(self, wp):
+        """Should log warning when no date patterns match."""
+        mock_doc = MagicMock()
+        current_date = date(2026, 1, 14)  # Wednesday
+
+        with patch.object(wp, "_normalize_spaces_in_doc"), \
+             patch.object(wp, "_execute_replace", return_value=False), \
+             patch("src.word_processor.logger") as mock_logger:
+            wp.replace_dates(mock_doc, current_date)
+            mock_logger.warning.assert_called()
+
+    def test_normalize_spaces_called_before_patterns(self, wp):
+        """Should normalize non-breaking spaces before running date patterns."""
+        mock_doc = MagicMock()
+        current_date = date(2026, 1, 14)
+
+        call_order = []
+
+        def track_normalize(doc):
+            call_order.append("normalize")
+
+        def track_execute(doc, find_text, replace_text):
+            call_order.append("execute")
+            return False
+
+        with patch.object(wp, "_normalize_spaces_in_doc", side_effect=track_normalize), \
+             patch.object(wp, "_execute_replace", side_effect=track_execute):
+            wp.replace_dates(mock_doc, current_date)
+
+        assert call_order[0] == "normalize"
+        assert "execute" in call_order
+
+    def test_run_find_replace_returns_bool(self, wp):
+        """_run_find_replace should return True when pattern matches."""
+        mock_range = MagicMock()
+        mock_range.Find.Execute.return_value = True
+
+        result = wp._run_find_replace(mock_range, "pattern", "replacement")
+        assert result is True
+
+    def test_run_find_replace_returns_false_on_no_match(self, wp):
+        """_run_find_replace should return False when pattern doesn't match."""
+        mock_range = MagicMock()
+        mock_range.Find.Execute.return_value = False
+
+        result = wp._run_find_replace(mock_range, "pattern", "replacement")
+        assert result is False

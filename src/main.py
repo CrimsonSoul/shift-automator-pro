@@ -140,29 +140,45 @@ class ShiftAutomatorApp:
         # Reset cancel flag
         self._cancel_event.clear()
 
+        # Collect all UI values in the main thread (Tkinter is not thread-safe)
+        batch_params = {
+            'start_date': self.ui.get_start_date(),
+            'end_date': self.ui.get_end_date(),
+            'day_folder': self.ui.get_day_folder(),
+            'night_folder': self.ui.get_night_folder(),
+            'printer_name': self.ui.get_printer_name(),
+        }
+
         # Update button text to STOP
         if self.ui.print_btn:
             self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.error)
-        
-        # Start processing thread
+
+        # Start processing thread with pre-collected values
         self._processing_thread = threading.Thread(
             target=self._process_batch,
+            args=(batch_params,),
             daemon=True
         )
         self._processing_thread.start()
 
-    def _process_batch(self) -> None:
-        """Process the batch of schedules."""
-        start_date = self.ui.get_start_date()
-        end_date = self.ui.get_end_date()
-        
+    def _process_batch(self, params: dict) -> None:
+        """
+        Process the batch of schedules.
+
+        Args:
+            params: Pre-collected UI values with keys: start_date, end_date,
+                    day_folder, night_folder, printer_name
+        """
+        start_date = params['start_date']
+        end_date = params['end_date']
+
         if not start_date or not end_date:
             logger.error("Attempted to process batch with missing dates")
             return
 
-        day_folder = self.ui.get_day_folder()
-        night_folder = self.ui.get_night_folder()
-        printer_name = self.ui.get_printer_name()
+        day_folder = params['day_folder']
+        night_folder = params['night_folder']
+        printer_name = params['printer_name']
 
         # Save configuration
         config = AppConfig(

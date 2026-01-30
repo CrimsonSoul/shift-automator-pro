@@ -80,10 +80,12 @@ schedule_app/
 │   ├── word_processor.py     # Word document processing
 │   └── main.py              # Main application controller
 ├── tests/
-│   ├── __init__.py
-│   ├── test_config.py        # Configuration tests
-│   ├── test_path_validation.py  # Path validation tests
-│   └── test_scheduler.py     # Scheduler tests
+│   ├── conftest.py             # Mock Windows modules for cross-platform testing
+│   ├── test_config.py          # Configuration tests
+│   ├── test_path_validation.py # Path validation tests
+│   ├── test_scheduler.py       # Scheduler tests
+│   ├── test_ui.py              # UI component tests
+│   └── test_word_processor.py  # Word processor tests
 ├── main.py                  # Application entry point
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Development dependencies

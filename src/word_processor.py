@@ -141,7 +141,7 @@ class WordProcessor:
             return None
 
         folder_path = str(Path(folder).resolve())
-        template_name_lower = template_name.lower()
+        template_name_lower = " ".join(template_name.lower().split())
 
         # Build cache if not already present for this folder
         if folder_path not in self._template_cache:
@@ -150,7 +150,7 @@ class WordProcessor:
                 cache = {}
                 for f in files:
                     if f.lower().endswith(DOCX_EXTENSION):
-                        base_name = f.lower().replace(DOCX_EXTENSION, "")
+                        base_name = " ".join(f.lower().replace(DOCX_EXTENSION, "").split())
                         cache[base_name] = os.path.join(folder_path, f)
                 self._template_cache[folder_path] = cache
                 logger.debug(f"Cached {len(cache)} templates from {folder_path}")
@@ -159,6 +159,8 @@ class WordProcessor:
                 return None
 
         cache = self._template_cache[folder_path]
+        logger.debug(f"Looking for template '{template_name}' (normalized: '{template_name_lower}') "
+                     f"in cache with {len(cache)} entries: {list(cache.keys())}")
 
         # 1. Try exact match
         if template_name_lower in cache:
@@ -167,8 +169,9 @@ class WordProcessor:
             return target
 
         # 2. Try robust matching using word boundaries
-        # This prevents "Thursday" matching "THIRD Thursday" 
+        # This prevents "Thursday" matching "THIRD Thursday"
         # but allows "Thursday" matching "Thursday Night" if it's the only match
+        logger.debug(f"No exact match for '{template_name_lower}', trying robust matching")
         pattern = re.compile(rf"\b{re.escape(template_name_lower)}\b")
         
         matches = []
@@ -218,6 +221,7 @@ class WordProcessor:
         target_file = self.find_template_file(folder, template_name)
         if not target_file:
             return False, f"Template not found: {template_name}"
+        logger.info(f"Template '{template_name}' resolved to: {target_file}")
 
         doc = None
         try:
@@ -275,6 +279,9 @@ class WordProcessor:
             doc: The Word document object
             current_date: The date to use for replacements
         """
+        # Normalize non-breaking spaces before running patterns
+        self._normalize_spaces_in_doc(doc)
+
         # Format date components
         new_day = current_date.strftime("%A")
         new_month = current_date.strftime("%B")
@@ -289,6 +296,11 @@ class WordProcessor:
                 "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
                 f"{new_day}, {new_month} {new_day_num}, {new_year}"
             ),
+            # Day Shift Style Abbreviated: "Sun, January 04, 2026"
+            (
+                "[A-Za-z]{3}, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                f"{new_day}, {new_month} {new_day_num}, {new_year}"
+            ),
             # Night Shift Style (No Comma): "Saturday January 03, 2026"
             (
                 "[A-Za-z]@ [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
@@ -301,12 +313,46 @@ class WordProcessor:
             ),
         ]
 
+        any_matched = False
         for find_text, replace_text in patterns:
-            self._execute_replace(doc, find_text, replace_text)
+            if self._execute_replace(doc, find_text, replace_text):
+                any_matched = True
+
+        if not any_matched:
+            logger.warning(f"No date patterns matched in document for {current_date}. "
+                          f"The template may use an unsupported date format.")
 
         logger.debug(f"Date replacements completed for {current_date}")
 
-    def _execute_replace(self, doc: Any, find_text: str, replace_text: str) -> None:
+    def _normalize_spaces_in_doc(self, doc: Any) -> None:
+        """
+        Replace non-breaking spaces with regular spaces in the document.
+
+        Word templates frequently contain non-breaking spaces (Unicode 00A0)
+        which prevent wildcard find/replace patterns from matching date strings.
+        """
+        try:
+            for story in doc.StoryRanges:
+                f = story.Find
+                f.ClearFormatting()
+                f.Replacement.ClearFormatting()
+                f.Execute(
+                    "^s",       # FindText: ^s = non-breaking space in Word
+                    False,      # MatchCase
+                    False,      # MatchWholeWord
+                    False,      # MatchWildcards (must be False for special codes)
+                    False,      # MatchSoundsLike
+                    False,      # MatchAllWordForms
+                    True,       # Forward
+                    1,          # Wrap (wdFindContinue)
+                    False,      # Format
+                    " ",        # ReplaceWith: regular space
+                    2           # Replace (wdReplaceAll)
+                )
+        except Exception as e:
+            logger.debug(f"Non-breaking space normalization: {e}")
+
+    def _execute_replace(self, doc: Any, find_text: str, replace_text: str) -> bool:
         """
         Execute a find and replace operation across all story ranges.
 
@@ -314,18 +360,25 @@ class WordProcessor:
             doc: The Word document object
             find_text: The text pattern to find
             replace_text: The replacement text
+
+        Returns:
+            True if at least one replacement was made
         """
+        any_replaced = False
         try:
             for story in doc.StoryRanges:
-                self._run_find_replace(story, find_text, replace_text)
+                if self._run_find_replace(story, find_text, replace_text):
+                    any_replaced = True
                 nxt = story.NextStoryRange
                 while nxt:
-                    self._run_find_replace(nxt, find_text, replace_text)
+                    if self._run_find_replace(nxt, find_text, replace_text):
+                        any_replaced = True
                     nxt = nxt.NextStoryRange
         except Exception as e:
             logger.warning(f"Error during find/replace: {e}")
+        return any_replaced
 
-    def _run_find_replace(self, range_obj: Any, find_text: str, replace_text: str) -> None:
+    def _run_find_replace(self, range_obj: Any, find_text: str, replace_text: str) -> bool:
         """
         Run a single find and replace operation on a range.
 
@@ -333,6 +386,9 @@ class WordProcessor:
             range_obj: The Word range object
             find_text: The text pattern to find
             replace_text: The replacement text
+
+        Returns:
+            True if the pattern was found and replaced
         """
         try:
             f = range_obj.Find
@@ -341,7 +397,7 @@ class WordProcessor:
             # Execute: FindText, MatchCase, MatchWholeWord, MatchWildcards,
             #          MatchSoundsLike, MatchAllWordForms, Forward, Wrap, Format,
             #          ReplaceWith, Replace
-            f.Execute(
+            result = f.Execute(
                 find_text,      # FindText
                 False,          # MatchCase
                 False,          # MatchWholeWord
@@ -354,8 +410,12 @@ class WordProcessor:
                 replace_text,   # ReplaceWith
                 2               # Replace (wdReplaceAll)
             )
+            if result:
+                logger.debug(f"Find/replace matched: '{find_text}' -> '{replace_text}'")
+            return bool(result)
         except Exception as e:
             logger.warning(f"Error in find/replace operation: {e}")
+            return False
 
     def __enter__(self):
         """Context manager entry."""
