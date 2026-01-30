@@ -232,6 +232,6 @@ class TestIsPathWithinBase:
             pytest.skip("Symlinks not supported")
 
     def test_nonexistent_path(self, tmp_path):
-        """Non-existent path should return False."""
+        """Non-existent path within base should still return True."""
         nonexistent = tmp_path / "nonexistent"
         assert is_path_within_base(str(nonexistent), str(tmp_path)) is True

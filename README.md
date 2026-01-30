@@ -32,7 +32,7 @@ Download the latest `Shift Automator Pro.exe` from the [Releases](https://github
 1. Clone the repository:
    ```bash
    git clone https://github.com/CrimsonSoul/shift-automator-pro.git
-   cd shift-automator
+   cd shift-automator-pro
    ```
 
 2. Create a virtual environment:

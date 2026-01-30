@@ -118,7 +118,5 @@ def get_date_range(start_date: date, end_date: date) -> list[date]:
         raise ValueError(error_msg)
 
     delta = (end_date - start_date).days
-    if delta + 1 > MAX_DAYS_RANGE:
-        raise ValueError(f"Date range exceeds maximum allowed ({MAX_DAYS_RANGE} days)")
     return [start_date + timedelta(days=i) for i in range(delta + 1)]
 
