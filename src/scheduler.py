@@ -91,6 +91,11 @@ def validate_date_range(start_date: date, end_date: date) -> tuple[bool, Optiona
     """
     if end_date < start_date:
         return False, "End date cannot be before start date"
+
+    total_days = (end_date - start_date).days + 1
+    if total_days > MAX_DAYS_RANGE:
+        return False, f"Date range exceeds maximum allowed ({MAX_DAYS_RANGE} days)"
+
     return True, None
 
 

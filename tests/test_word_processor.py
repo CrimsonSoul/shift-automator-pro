@@ -213,3 +213,33 @@ class TestWordProcessor:
 
         result = wp._run_find_replace(mock_range, "pattern", "replacement")
         assert result is False
+
+    @patch("src.word_processor.pythoncom.CoInitialize")
+    @patch("src.word_processor.win32com.client.Dispatch")
+    def test_context_manager_enter_exit(self, mock_dispatch, mock_coinit):
+        """Context manager should initialize on enter and shutdown on exit."""
+        wp = WordProcessor()
+        assert wp._initialized is False
+
+        with wp:
+            assert wp._initialized is True
+            assert wp.word_app is not None
+
+        # After exit, word_app should be None (shutdown called)
+        assert wp.word_app is None
+        assert wp._initialized is False
+
+    def test_print_document_rejects_path_traversal(self, wp, tmp_path):
+        """print_document should reject templates outside the folder."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        # Manually place a malicious path in the cache
+        folder_path = str(tmp_path.resolve())
+        wp._template_cache[folder_path] = {
+            "thursday": "/etc/passwd"
+        }
+
+        success, error = wp.print_document(str(tmp_path), "Thursday", date(2026, 1, 15), "Printer")
+        assert success is False
+        assert "outside" in error.lower()

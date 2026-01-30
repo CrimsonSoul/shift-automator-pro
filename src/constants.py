@@ -12,6 +12,7 @@ __all__ = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "
            "PROTECTION_NONE", "PROTECTION_READ_ONLY", "PROTECTION_ALLOW_COMMENTS", "PROTECTION_ALLOW_REVISIONS",
            "CLOSE_NO_SAVE", "CLOSE_SAVE", "CLOSE_PROMPT",
            "PRINTER_ENUM_LOCAL", "PRINTER_ENUM_NETWORK",
+           "DEFAULT_PRINTER_LABEL",
            "DOCX_EXTENSION", "CONFIG_FILENAME", "LOG_FILENAME",
            "WINDOW_WIDTH", "WINDOW_HEIGHT", "WINDOW_RESIZABLE",
            "PROGRESS_MAX", "MAX_DAYS_RANGE",
@@ -27,20 +28,23 @@ FRIDAY: Final = 4
 SATURDAY: Final = 5
 SUNDAY: Final = 6
 
-# Word document protection types
-PROTECTION_NONE: Final = -1
-PROTECTION_READ_ONLY: Final = 0
-PROTECTION_ALLOW_COMMENTS: Final = 1
-PROTECTION_ALLOW_REVISIONS: Final = 2
+# Word document protection types (Word API wdProtectionType)
+PROTECTION_NONE: Final = -1          # wdNoProtection
+PROTECTION_READ_ONLY: Final = 0      # wdAllowOnlyReading
+PROTECTION_ALLOW_COMMENTS: Final = 1 # wdAllowOnlyComments
+PROTECTION_ALLOW_REVISIONS: Final = 2 # wdAllowOnlyRevisions
 
-# Word document close options
-CLOSE_NO_SAVE: Final = 0
-CLOSE_SAVE: Final = 1
-CLOSE_PROMPT: Final = 2
+# Word document close options (Word API wdSaveOptions)
+CLOSE_NO_SAVE: Final = 0   # wdDoNotSaveChanges
+CLOSE_SAVE: Final = 1      # wdSaveChanges
+CLOSE_PROMPT: Final = 2    # wdPromptToSaveChanges
 
-# Windows printer enumeration constants
-PRINTER_ENUM_LOCAL: Final = 2
-PRINTER_ENUM_NETWORK: Final = 4
+# Windows printer enumeration constants (win32print flags)
+PRINTER_ENUM_LOCAL: Final = 2    # PRINTER_ENUM_LOCAL
+PRINTER_ENUM_NETWORK: Final = 4  # PRINTER_ENUM_CONNECTIONS
+
+# UI default labels
+DEFAULT_PRINTER_LABEL: Final = "Choose Printer"
 
 # File extensions
 DOCX_EXTENSION: Final = ".docx"

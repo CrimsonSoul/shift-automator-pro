@@ -25,13 +25,13 @@ A high-performance, modern desktop application for automating the management and
 
 ### Option 1: Portable EXE (Recommended)
 
-Download the latest `Shift Automator Pro.exe` from the [Releases](https://github.com/yourusername/shift-automator/releases) page. No installation required.
+Download the latest `Shift Automator Pro.exe` from the [Releases](https://github.com/CrimsonSoul/shift-automator-pro/releases) page. No installation required.
 
 ### Option 2: Run from Source
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/shift-automator.git
+   git clone https://github.com/CrimsonSoul/shift-automator-pro.git
    cd shift-automator
    ```
 

@@ -23,7 +23,7 @@ from .constants import (
     COM_RETRY_DELAY
 )
 from .logger import get_logger
-from .path_validation import validate_folder_path
+from .path_validation import validate_folder_path, is_path_within_base
 
 
 logger = get_logger(__name__)
@@ -73,8 +73,8 @@ class WordProcessor:
                 self._initialized = False
                 try:
                     pythoncom.CoUninitialize()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error in CoUninitialize: {e}")
 
     def clear_template_cache(self, folder: Optional[str] = None) -> None:
         """
@@ -221,6 +221,11 @@ class WordProcessor:
         target_file = self.find_template_file(folder, template_name)
         if not target_file:
             return False, f"Template not found: {template_name}"
+
+        # Verify template is within the expected folder (prevents path traversal)
+        if not is_path_within_base(target_file, folder):
+            logger.error(f"Template path '{target_file}' is outside folder '{folder}'")
+            return False, f"Template path is outside the expected folder"
         logger.info(f"Template '{template_name}' resolved to: {target_file}")
 
         doc = None

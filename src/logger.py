@@ -5,6 +5,7 @@ This module sets up the logging system with both file and console handlers.
 """
 
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 from typing import Optional
@@ -61,9 +62,11 @@ def setup_logging(
         datefmt='%H:%M:%S'
     )
 
-    # File handler (detailed)
+    # File handler (detailed, with rotation: 5MB max, keep 3 backups)
     try:
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8'
+        )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(detailed_formatter)
         logger.addHandler(file_handler)

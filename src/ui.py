@@ -17,7 +17,8 @@ from .constants import (
     COLORS, FONTS,
     WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RESIZABLE,
     PROGRESS_MAX,
-    PRINTER_ENUM_LOCAL, PRINTER_ENUM_NETWORK
+    PRINTER_ENUM_LOCAL, PRINTER_ENUM_NETWORK,
+    DEFAULT_PRINTER_LABEL
 )
 from .logger import get_logger
 
@@ -172,7 +173,7 @@ class ScheduleAppUI:
         try:
             local_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_LOCAL)]
             network_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_NETWORK)]
-            all_printers = sorted(list(set(local_printers + network_printers)))
+            all_printers = sorted(set(local_printers + network_printers))
             logger.debug(f"Found {len(all_printers)} printers")
         except Exception as e:
             logger.error(f"Error enumerating printers: {e}")
@@ -180,9 +181,13 @@ class ScheduleAppUI:
 
         self.printer_var = tk.StringVar(value="")
         self.printer_dropdown = ttk.OptionMenu(
-            output_row, self.printer_var, "Choose Printer", *all_printers
+            output_row, self.printer_var, DEFAULT_PRINTER_LABEL, *all_printers
         )
         self.printer_dropdown.pack(fill="x")
+
+        if not all_printers:
+            ttk.Label(output_row, text="No printers found. Check connections.",
+                     style="Sub.TLabel", foreground=COLORS.error).pack(anchor="w", pady=(4, 0))
 
     def _create_footer(self, parent: ttk.Frame) -> None:
         """Create the action footer."""

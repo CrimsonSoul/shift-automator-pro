@@ -101,6 +101,14 @@ class TestValidateDateRange:
         assert is_valid is False
         assert error == "End date cannot be before start date"
 
+    def test_range_too_large(self):
+        """Range exceeding MAX_DAYS_RANGE should be invalid."""
+        start = date(2026, 1, 1)
+        end = date(2027, 1, 2)  # 367 days
+        is_valid, error = validate_date_range(start, end)
+        assert is_valid is False
+        assert "exceeds maximum" in error
+
 
 class TestGetDateRange:
     """Tests for get_date_range function."""

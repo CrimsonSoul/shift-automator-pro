@@ -11,7 +11,7 @@ from typing import Optional
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
-from .constants import PROGRESS_MAX, COLORS, MAX_DAYS_RANGE
+from .constants import PROGRESS_MAX, COLORS, DEFAULT_PRINTER_LABEL
 
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
@@ -46,6 +46,9 @@ class ShiftAutomatorApp:
 
         # Set up button command
         self.ui.set_start_command(self.start_processing)
+
+        # Handle window close gracefully
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         logger.info("Shift Automator application initialized")
 
@@ -96,7 +99,7 @@ class ShiftAutomatorApp:
             return False, "Please select a Day Templates folder"
         if not night_folder:
             return False, "Please select a Night Templates folder"
-        if not printer_name or printer_name == "Choose Printer":
+        if not printer_name or printer_name == DEFAULT_PRINTER_LABEL:
             return False, "Please select a target printer"
 
         # Validate folder paths
@@ -188,16 +191,8 @@ class ShiftAutomatorApp:
         )
         self._save_config(config)
 
-        # Calculate total days
+        # Calculate total days (MAX_DAYS_RANGE already validated by _validate_inputs)
         total_days = (end_date - start_date).days + 1
-        
-        # Validate max days
-        if total_days > MAX_DAYS_RANGE:
-            self.root.after(0, lambda: self.ui.show_warning(
-                "Range Too Large", 
-                f"Please select a range of {MAX_DAYS_RANGE} days or less (selected {total_days} days)."
-            ))
-            return
 
         logger.info(f"Processing {total_days} days from {start_date} to {end_date}")
 
@@ -278,6 +273,14 @@ class ShiftAutomatorApp:
             
             self.root.after(0, reset_ui)
 
+
+    def _on_close(self) -> None:
+        """Handle window close: cancel any running batch and shut down cleanly."""
+        if self._processing_thread and self._processing_thread.is_alive():
+            logger.info("Window close requested during processing, cancelling...")
+            self._cancel_event.set()
+            self._processing_thread.join(timeout=5)
+        self.root.destroy()
 
     def _show_failure_summary(self, failed_operations: list[dict]) -> None:
         """
