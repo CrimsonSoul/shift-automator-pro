@@ -70,14 +70,18 @@ class TestSetupLogging:
         assert logging.StreamHandler in handler_types
 
     def test_clears_existing_handlers(self, tmp_path):
-        """Should clear existing root handlers to avoid duplicates."""
+        """Should clear its own handlers on re-init but preserve third-party ones."""
         root = logging.getLogger()
-        root.addHandler(logging.StreamHandler())
-        initial_count = len(root.handlers)
+        # Add a handler that is NOT tagged as ours.
+        third_party = logging.StreamHandler()
+        root.addHandler(third_party)
 
         setup_logging(log_dir=str(tmp_path))
-        # After setup, should only have file + console handlers (2 total)
-        assert len(root.handlers) == 2
+        # Our 2 tagged handlers are added; the third-party handler survives.
+        tagged = [h for h in root.handlers if getattr(h, "_shift_automator", False)]
+        assert len(tagged) == 2
+        assert third_party in root.handlers
+        root.removeHandler(third_party)
 
     def test_graceful_fallback_on_unwritable_dir(self, tmp_path):
         """Should still add a console handler if file handler fails."""

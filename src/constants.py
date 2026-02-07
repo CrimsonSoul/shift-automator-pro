@@ -24,7 +24,7 @@ __all__ = [
     "CLOSE_SAVE",
     "CLOSE_PROMPT",
     "PRINTER_ENUM_LOCAL",
-    "PRINTER_ENUM_NETWORK",
+    "PRINTER_ENUM_CONNECTIONS",
     "DEFAULT_PRINTER_LABEL",
     "DOCX_EXTENSION",
     "CONFIG_FILENAME",
@@ -74,13 +74,14 @@ PROTECTION_ALLOW_FORM_FIELDS: Final = 2  # wdAllowOnlyFormFields
 PROTECTION_READ_ONLY: Final = 3  # wdAllowOnlyReading
 
 # Word document close options (Word API wdSaveOptions)
+# https://learn.microsoft.com/en-us/office/vba/api/word.wdsaveoptions
 CLOSE_NO_SAVE: Final = 0  # wdDoNotSaveChanges
-CLOSE_SAVE: Final = 1  # wdSaveChanges
-CLOSE_PROMPT: Final = 2  # wdPromptToSaveChanges
+CLOSE_SAVE: Final = -1  # wdSaveChanges
+CLOSE_PROMPT: Final = -2  # wdPromptToSaveChanges
 
 # Windows printer enumeration constants (win32print flags)
 PRINTER_ENUM_LOCAL: Final = 2  # PRINTER_ENUM_LOCAL
-PRINTER_ENUM_NETWORK: Final = 4  # PRINTER_ENUM_CONNECTIONS
+PRINTER_ENUM_CONNECTIONS: Final = 4  # PRINTER_ENUM_CONNECTIONS (user-connected printers)
 
 # UI default labels
 DEFAULT_PRINTER_LABEL: Final = "Choose Printer"
@@ -121,13 +122,13 @@ COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
 
 # Word story types (used to target header/footer-only replacements)
-# See: https://learn.microsoft.com/en-us/office/vba/api/word.wdstorytype
-WD_PRIMARY_HEADER_STORY: Final = 7
-WD_EVEN_PAGES_HEADER_STORY: Final = 8
-WD_PRIMARY_FOOTER_STORY: Final = 9
-WD_EVEN_PAGES_FOOTER_STORY: Final = 10
-WD_FIRST_PAGE_HEADER_STORY: Final = 11
-WD_FIRST_PAGE_FOOTER_STORY: Final = 12
+# https://learn.microsoft.com/en-us/office/vba/api/word.wdstorytype
+WD_EVEN_PAGES_HEADER_STORY: Final = 6  # wdEvenPagesHeaderStory
+WD_PRIMARY_HEADER_STORY: Final = 7  # wdPrimaryHeaderStory
+WD_EVEN_PAGES_FOOTER_STORY: Final = 8  # wdEvenPagesFooterStory
+WD_PRIMARY_FOOTER_STORY: Final = 9  # wdPrimaryFooterStory
+WD_FIRST_PAGE_HEADER_STORY: Final = 10  # wdFirstPageHeaderStory
+WD_FIRST_PAGE_FOOTER_STORY: Final = 11  # wdFirstPageFooterStory
 
 # Word Find/Replace constants
 # See: https://learn.microsoft.com/en-us/office/vba/api/word.wdfindwrap

@@ -4,6 +4,7 @@ Configuration management for Shift Automator application.
 This module handles loading, saving, and validating configuration settings.
 """
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -49,9 +50,9 @@ class AppConfig:
             A new ``AppConfig`` instance.
         """
         return cls(
-            day_folder=data.get("day_folder", ""),
-            night_folder=data.get("night_folder", ""),
-            printer_name=data.get("printer_name", ""),
+            day_folder=str(data.get("day_folder", "") or ""),
+            night_folder=str(data.get("night_folder", "") or ""),
+            printer_name=str(data.get("printer_name", "") or ""),
             headers_footers_only=bool(data.get("headers_footers_only", False)),
         )
 
@@ -67,7 +68,7 @@ class ConfigManager:
             config_path: Path to config file (default: per-user data
                 directory / CONFIG_FILENAME, i.e. ``%APPDATA%`` on Windows)
         """
-        self._legacy_config_path = Path(CONFIG_FILENAME)
+        self._legacy_config_path = Path(CONFIG_FILENAME).resolve()
         self._allow_legacy_migration = config_path is None
         if config_path:
             self.config_path = Path(config_path)
@@ -130,12 +131,12 @@ class ConfigManager:
                 self._config = AppConfig.from_dict(data)
                 logger.info(f"Configuration loaded from {self.config_path}")
                 return self._config
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config file: {e}")
-            raise
-        except IOError as e:
-            logger.error(f"Error reading config file: {e}")
-            raise
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            logger.warning(
+                f"Could not read config at {self.config_path}, using defaults: {e}"
+            )
+            self._config = AppConfig()
+            return self._config
 
     def save(self, config: Optional[AppConfig] = None) -> None:
         """
@@ -152,12 +153,12 @@ class ConfigManager:
             logger.warning("No configuration to save")
             return
 
+        tmp_path = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
         try:
             # Ensure parent directory exists
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Write atomically: write to a temp file then replace.
-            tmp_path = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(config_to_save.to_dict(), f, indent=4)
                 f.flush()
@@ -165,8 +166,10 @@ class ConfigManager:
 
             os.replace(tmp_path, self.config_path)
             logger.info(f"Configuration saved to {self.config_path}")
-        except (IOError, OSError) as e:
-            logger.error(f"Error saving config file: {e}")
+        except Exception:
+            # Clean up orphaned temp file on any failure.
+            with contextlib.suppress(OSError):
+                tmp_path.unlink(missing_ok=True)
             raise
 
     @property

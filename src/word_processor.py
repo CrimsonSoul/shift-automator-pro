@@ -200,7 +200,7 @@ class WordProcessor:
             if name.startswith("~$") or name.startswith("."):
                 continue
             if name.lower().endswith(DOCX_EXTENSION):
-                base_name = " ".join(name.lower().replace(DOCX_EXTENSION, "").split())
+                base_name = " ".join(entry.stem.lower().split())
                 cache[base_name] = str(entry)
         return cache
 
@@ -419,7 +419,7 @@ class WordProcessor:
             # Open the document
             logger.debug(f"Opening document: {target_file}")
             doc = self.safe_com_call(
-                self.word_app.Documents.Open, target_file, False, False
+                self.word_app.Documents.Open, target_file, False, True
             )
 
             # Unprotect if necessary
@@ -429,6 +429,15 @@ class WordProcessor:
                     logger.debug("Document unprotected")
                 except Exception as e:
                     logger.warning(f"Could not unprotect document: {e}")
+                    # If still protected, date replacement will silently fail.
+                    # Abort rather than printing with wrong dates.
+                    if doc.ProtectionType != PROTECTION_NONE:
+                        self.safe_com_call(doc.Close, CLOSE_NO_SAVE)
+                        doc = None
+                        return (
+                            False,
+                            f"Document is protected and could not be unprotected: {template_name}",
+                        )
 
             # Replace dates
             self.replace_dates(
@@ -641,7 +650,7 @@ class WordProcessor:
                         yield cur
                     cur = getattr(cur, "NextStoryRange", None)
         except Exception as e:
-            logger.debug(f"Error iterating story ranges: {e}")
+            logger.warning(f"Error iterating story ranges: {e}")
 
     def _run_find_replace(
         self, range_obj: Any, find_text: str, replace_text: str

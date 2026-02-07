@@ -393,7 +393,7 @@ class TestShiftAutomatorApp:
         ]
 
         with patch("src.main.get_data_dir", return_value=tmp_path):
-            app._show_failure_summary(failures)
+            app._show_failure_summary(failures, report_path="/fake/report.csv")
 
         app.ui.show_warning.assert_called_once()
         msg = app.ui.show_warning.call_args[0][1]

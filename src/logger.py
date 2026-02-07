@@ -54,8 +54,12 @@ def setup_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
 
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
+    # Remove only handlers previously added by this module to avoid
+    # destroying third-party or test-framework handlers.
+    _TAG = "_shift_automator"
+    for h in root_logger.handlers[:]:
+        if getattr(h, _TAG, False):
+            root_logger.removeHandler(h)
 
     # Create formatters
     detailed_formatter = logging.Formatter(
@@ -73,6 +77,7 @@ def setup_logging(
         )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(detailed_formatter)
+        setattr(file_handler, _TAG, True)
         root_logger.addHandler(file_handler)
     except (IOError, OSError) as e:
         # If we can't write to file, at least log to console
@@ -82,6 +87,7 @@ def setup_logging(
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
     console_handler.setFormatter(simple_formatter)
+    setattr(console_handler, _TAG, True)
     root_logger.addHandler(console_handler)
 
     return root_logger

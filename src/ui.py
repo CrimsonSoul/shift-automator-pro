@@ -33,7 +33,7 @@ from .constants import (
     WINDOW_RESIZABLE,
     PROGRESS_MAX,
     PRINTER_ENUM_LOCAL,
-    PRINTER_ENUM_NETWORK,
+    PRINTER_ENUM_CONNECTIONS,
     DEFAULT_PRINTER_LABEL,
     AUTO_RESIZE_MIN_WIDTH,
     AUTO_RESIZE_MIN_HEIGHT,
@@ -84,10 +84,15 @@ class _ToolTip:
         widget.bind("<Enter>", self._schedule, add="+")
         widget.bind("<Leave>", self._hide, add="+")
         widget.bind("<ButtonPress>", self._hide, add="+")
+        widget.bind("<Destroy>", self._on_destroy, add="+")
 
     def _schedule(self, _event: Any = None) -> None:
         self._cancel()
         self._after_id = self._widget.after(self._delay, self._show)
+
+    def _on_destroy(self, _event: Any = None) -> None:
+        self._cancel()
+        self._hide()
 
     def _show(self) -> None:
         if self._tip_window:
@@ -98,7 +103,10 @@ class _ToolTip:
         except Exception as e:
             logger.debug(f"Tooltip geometry lookup failed: {e}")
             return
-        tw = tk.Toplevel(self._widget)
+        try:
+            tw = tk.Toplevel(self._widget)
+        except tk.TclError:
+            return
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
         label = tk.Label(
@@ -354,7 +362,7 @@ class ScheduleAppUI:
         try:
             local_printers = [p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_LOCAL)]
             network_printers = [
-                p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_NETWORK)
+                p[2] for p in win32print.EnumPrinters(PRINTER_ENUM_CONNECTIONS)
             ]
             return sorted(set(local_printers + network_printers))
         except Exception as e:
@@ -460,9 +468,13 @@ class ScheduleAppUI:
     def _create_date_range_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the date range selection row."""
         if DateEntry is None:
-            raise RuntimeError(
-                "Missing dependency: tkcalendar. Please reinstall requirements.txt and try again."
-            )
+            ttk.Label(
+                parent,
+                text="Missing dependency: tkcalendar. Please reinstall requirements.txt.",
+                style="Error.TLabel",
+            ).pack(anchor="w", pady=(0, 8))
+            logger.error("tkcalendar is not installed; date pickers unavailable")
+            return
 
         date_entry_cls = cast(Any, DateEntry)
 
@@ -892,26 +904,37 @@ class ScheduleAppUI:
         if self.print_btn:
             self.print_btn.config(state=state)
 
-    def update_status(self, message: str, progress: float) -> None:
+    def update_status(
+        self,
+        message: str,
+        progress: float,
+        level: Optional[Literal["info", "success", "error"]] = None,
+    ) -> None:
         """
         Update the status label and progress bar.
-
-        The label style is automatically set based on the message content:
-        green for completion, red for cancellation/error, dim for idle.
 
         Args:
             message: Status message to display
             progress: Progress value (0-100)
+            level: Explicit style level.  When ``None`` (default) the style
+                is inferred from the message text for backward compatibility.
         """
         if self.status_label:
-            # Pick contextual style based on message.
-            msg_lower = message.lower()
-            if "complete" in msg_lower:
+            if level == "success":
                 style = "Success.TLabel"
-            elif "cancel" in msg_lower or "error" in msg_lower or "fail" in msg_lower:
+            elif level == "error":
                 style = "Error.TLabel"
-            else:
+            elif level is not None:
                 style = "Sub.TLabel"
+            else:
+                # Infer from message for callers that don't pass level.
+                msg_lower = message.lower()
+                if "complete" in msg_lower:
+                    style = "Success.TLabel"
+                elif "cancel" in msg_lower or "error" in msg_lower or "fail" in msg_lower:
+                    style = "Error.TLabel"
+                else:
+                    style = "Sub.TLabel"
             self.status_label.config(text=message, style=style)
         if self.progress_var:
             self.progress_var.set(progress)

@@ -343,13 +343,15 @@ class ShiftAutomatorApp:
         # Reset cancel flag
         self._cancel_event.clear()
 
-        # Collect all UI values in the main thread (Tkinter is not thread-safe)
+        # Collect all UI values in the main thread (Tkinter is not thread-safe).
+        # Strip surrounding quotes so paths validated in _validate_inputs match
+        # the paths used during processing (both must apply the same transform).
         batch_params = {
             "start_date": self.ui.get_start_date(),
             "end_date": self.ui.get_end_date(),
-            "day_folder": self.ui.get_day_folder(),
-            "night_folder": self.ui.get_night_folder(),
-            "printer_name": self.ui.get_printer_name(),
+            "day_folder": (self.ui.get_day_folder() or "").strip().strip('"').strip("'"),
+            "night_folder": (self.ui.get_night_folder() or "").strip().strip('"').strip("'"),
+            "printer_name": (self.ui.get_printer_name() or "").strip(),
             "headers_footers_only": self.ui.get_headers_footers_only(),
         }
 
@@ -358,9 +360,11 @@ class ShiftAutomatorApp:
         if self.ui.print_btn:
             self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.error)
 
-        # Start processing thread with pre-collected values
+        # Start processing thread with pre-collected values.
+        # Non-daemon so that __exit__/finally COM cleanup runs even if the
+        # main thread exits.  _on_close joins with a timeout to avoid hanging.
         self._processing_thread = threading.Thread(
-            target=self._process_batch, args=(batch_params,), daemon=True
+            target=self._process_batch, args=(batch_params,), daemon=False
         )
         self._processing_thread.start()
 
@@ -547,8 +551,12 @@ class ShiftAutomatorApp:
 
                 # Show results
                 if failed_operations:
+                    # Write the CSV report on the worker thread to keep the
+                    # UI thread free of blocking I/O.
+                    report_path = self._write_failure_report(failed_operations)
+                    snapshot = list(failed_operations)
                     self._safe_after(
-                        lambda: self._show_failure_summary(failed_operations)
+                        lambda: self._show_failure_summary(snapshot, report_path)
                     )
                 else:
                     self._safe_after(
@@ -600,15 +608,20 @@ class ShiftAutomatorApp:
 
         self.root.destroy()
 
-    def _show_failure_summary(self, failed_operations: list[FailedOperation]) -> None:
+    def _show_failure_summary(
+        self,
+        failed_operations: list[FailedOperation],
+        report_path: Optional[str] = None,
+    ) -> None:
         """
         Show a summary of failed operations.
 
         Args:
             failed_operations: List of failed operation details
+            report_path: Pre-computed path to the CSV failure report, or
+                ``None`` if it was not written (or write failed).
         """
         total = len(failed_operations)
-        report_path = self._write_failure_report(failed_operations)
         message = f"{total} operation(s) failed:\n\n"
 
         # Show first N failures

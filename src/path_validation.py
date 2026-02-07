@@ -113,6 +113,17 @@ def validate_file_path(
         return False, f"Error accessing file: {e}"
 
 
+# Windows reserved device names that cannot be used as filenames.
+_WINDOWS_RESERVED_NAMES = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+})
+
+# Single-pass translation table for dangerous characters.
+_DANGEROUS_CHAR_TABLE = str.maketrans({c: "_" for c in '/\\:*?"<>|'})
+
+
 def sanitize_filename(filename: str) -> str:
     """
     Sanitize a filename by removing potentially dangerous characters.
@@ -125,11 +136,8 @@ def sanitize_filename(filename: str) -> str:
     Returns:
         Sanitized filename
     """
-    # Remove path separators and other dangerous characters
-    dangerous_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
-    sanitized = filename
-    for char in dangerous_chars:
-        sanitized = sanitized.replace(char, "_")
+    # Replace dangerous characters in a single pass.
+    sanitized = filename.translate(_DANGEROUS_CHAR_TABLE)
 
     # Remove leading/trailing dots and spaces
     sanitized = sanitized.strip(". ")
@@ -138,9 +146,19 @@ def sanitize_filename(filename: str) -> str:
     if not sanitized:
         sanitized = "_unnamed"
 
-    # Limit length
+    # Block Windows reserved device names (CON, PRN, NUL, COM1, etc.)
+    stem = sanitized.split(".")[0].upper()
+    if stem in _WINDOWS_RESERVED_NAMES:
+        sanitized = f"_{sanitized}"
+
+    # Limit length while preserving the file extension.
     if len(sanitized) > MAX_FILENAME_LENGTH:
-        sanitized = sanitized[:MAX_FILENAME_LENGTH]
+        name_part, dot, ext_part = sanitized.rpartition(".")
+        if dot and name_part:
+            max_stem = MAX_FILENAME_LENGTH - len(ext_part) - 1
+            sanitized = f"{name_part[:max_stem]}.{ext_part}"
+        else:
+            sanitized = sanitized[:MAX_FILENAME_LENGTH]
 
     logger.debug(f"Sanitized filename: '{filename}' -> '{sanitized}'")
     return sanitized

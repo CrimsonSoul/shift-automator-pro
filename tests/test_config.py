@@ -104,13 +104,16 @@ class TestConfigManager:
         assert loaded_config.printer_name == original_config.printer_name
 
     def test_load_invalid_json(self, tmp_path):
-        """Loading invalid JSON should raise JSONDecodeError."""
+        """Loading invalid JSON should fall back to defaults (not crash)."""
         config_file = tmp_path / "config.json"
         config_file.write_text("{ invalid json }")
 
         manager = ConfigManager(str(config_file))
-        with pytest.raises(json.JSONDecodeError):
-            manager.load()
+        config = manager.load()
+        # Should silently return defaults instead of raising.
+        assert isinstance(config, AppConfig)
+        assert config.day_folder == ""
+        assert config.night_folder == ""
 
     def test_config_property(self, tmp_path):
         """Config property should load and cache config."""

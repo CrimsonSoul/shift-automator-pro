@@ -5,7 +5,6 @@ This module handles date calculations, including special scheduling rules
 like third Thursday detection.
 """
 
-import calendar
 from datetime import date, timedelta
 
 from typing import Optional
@@ -25,10 +24,16 @@ __all__ = [
 logger = get_logger(__name__)
 
 # Locale-independent English day and month names.
-# strftime("%A") and strftime("%B") return locale-dependent strings, which
-# breaks template lookup and date replacement on non-English Windows systems.
-_EN_DAY_NAMES: list[str] = list(calendar.day_name)  # Monday=0 .. Sunday=6
-_EN_MONTH_NAMES: list[str] = list(calendar.month_name)  # index 1=January .. 12=December
+# Hard-coded because both strftime("%A"/"%B") and calendar.day_name/month_name
+# are locale-dependent and return non-English strings on non-English Windows.
+_EN_DAY_NAMES: list[str] = [
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday",
+]
+_EN_MONTH_NAMES: list[str] = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
 
 
 def get_english_day_name(dt: date) -> str:
