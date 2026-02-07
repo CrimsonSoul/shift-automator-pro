@@ -560,9 +560,18 @@ class WordProcessor:
                 any_matched = True
 
         if not any_matched:
+            # Dump the first ~200 chars of the document body so the log shows
+            # exactly what text Word sees (including any invisible characters).
+            sample = ""
+            try:
+                body = doc.Content.Text
+                sample = repr(body[:200])
+            except Exception:
+                sample = "<could not read document text>"
             logger.warning(
                 f"No date patterns matched in document for {current_date}. "
-                f"The template may use an unsupported date format."
+                f"The template may use an unsupported date format. "
+                f"Document sample: {sample}"
             )
 
         logger.debug(f"Date replacements completed for {current_date}")
@@ -570,38 +579,65 @@ class WordProcessor:
     def _normalize_spaces_in_doc(
         self, doc: Any, allowed_story_types: Optional[set[int]] = None
     ) -> None:
-        """Replace non-breaking spaces with regular spaces in the document.
+        """Normalize invisible characters that break wildcard matching.
 
-        Word templates frequently contain non-breaking spaces (Unicode 00A0)
-        which prevent wildcard find/replace patterns from matching date strings.
+        Word templates frequently contain non-breaking spaces (U+00A0),
+        soft hyphens (U+00AD), zero-width spaces (U+200B), and other
+        invisible Unicode characters that prevent wildcard find/replace
+        patterns from matching date strings.  This method replaces all
+        known problematic characters with their visible equivalents
+        (or removes them entirely).
 
         Args:
             doc: The Word document object.
             allowed_story_types: Optional set of Word StoryType constants to
                 restrict the scope of replacement.
         """
-        try:
-            for story in self._iter_story_ranges(
-                doc, allowed_story_types=allowed_story_types
-            ):
-                f = story.Find
-                f.ClearFormatting()
-                f.Replacement.ClearFormatting()
-                f.Execute(
-                    "^s",  # FindText: ^s = non-breaking space in Word
-                    False,  # MatchCase
-                    False,  # MatchWholeWord
-                    False,  # MatchWildcards (must be False for special codes)
-                    False,  # MatchSoundsLike
-                    False,  # MatchAllWordForms
-                    True,  # Forward
-                    WD_FIND_CONTINUE,  # Wrap
-                    False,  # Format
-                    " ",  # ReplaceWith: regular space
-                    WD_REPLACE_ALL,  # Replace
-                )
-        except Exception as e:
-            logger.debug(f"Non-breaking space normalization: {e}")
+        # Each tuple is (FindText, ReplaceWith, description).
+        # ^s   = non-breaking space (U+00A0) — replace with regular space
+        # ^~   = non-breaking hyphen          — replace with regular hyphen
+        # ^-   = optional/soft hyphen (U+00AD) — remove
+        # ^u8203 = zero-width space (U+200B)   — remove
+        # ^u8204 = zero-width non-joiner        — remove
+        # ^u8205 = zero-width joiner             — remove
+        # ^u8239 = narrow no-break space (U+202F) — replace with space
+        # ^u8194 = en space (U+2002)             — replace with space
+        # ^u8195 = em space (U+2003)             — replace with space
+        normalizations: list[tuple[str, str, str]] = [
+            ("^s", " ", "non-breaking space"),
+            ("^~", "-", "non-breaking hyphen"),
+            ("^-", "", "soft hyphen"),
+            ("^u8203", "", "zero-width space"),
+            ("^u8204", "", "zero-width non-joiner"),
+            ("^u8205", "", "zero-width joiner"),
+            ("^u8239", " ", "narrow no-break space"),
+            ("^u8194", " ", "en space"),
+            ("^u8195", " ", "em space"),
+        ]
+
+        for find_code, replace_with, desc in normalizations:
+            try:
+                for story in self._iter_story_ranges(
+                    doc, allowed_story_types=allowed_story_types
+                ):
+                    f = story.Find
+                    f.ClearFormatting()
+                    f.Replacement.ClearFormatting()
+                    f.Execute(
+                        find_code,
+                        False,  # MatchCase
+                        False,  # MatchWholeWord
+                        False,  # MatchWildcards (must be False for ^codes)
+                        False,  # MatchSoundsLike
+                        False,  # MatchAllWordForms
+                        True,   # Forward
+                        WD_FIND_CONTINUE,  # Wrap
+                        False,  # Format
+                        replace_with,
+                        WD_REPLACE_ALL,  # Replace
+                    )
+            except Exception as e:
+                logger.debug(f"{desc} normalization: {e}")
 
     def _execute_replace(
         self,
