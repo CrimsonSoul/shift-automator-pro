@@ -732,7 +732,6 @@ class ScheduleAppUI:
             activebackground=COLORS.accent_hover,
             activeforeground=COLORS.text_main,
             disabledforeground=COLORS.text_dim,
-            disabledbackground=COLORS.surface,  # type: ignore[call-arg]
         )
         self.print_btn.pack(fill="x")
 
