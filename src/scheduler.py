@@ -12,7 +12,12 @@ from typing import Optional
 from .constants import THURSDAY, MAX_DAYS_RANGE
 from .logger import get_logger
 
-__all__ = ["is_third_thursday", "get_shift_template_name", "validate_date_range", "get_date_range"]
+__all__ = [
+    "is_third_thursday",
+    "get_shift_template_name",
+    "validate_date_range",
+    "get_date_range",
+]
 
 logger = get_logger(__name__)
 
@@ -40,7 +45,6 @@ def is_third_thursday(dt: date) -> bool:
     is_third = 15 <= dt.day <= 21
     logger.debug(f"Date {dt} is third Thursday: {is_third}")
     return is_third
-
 
 
 def get_shift_template_name(dt: date, shift_type: str = "day") -> str:
@@ -119,4 +123,3 @@ def get_date_range(start_date: date, end_date: date) -> list[date]:
 
     delta = (end_date - start_date).days
     return [start_date + timedelta(days=i) for i in range(delta + 1)]
-

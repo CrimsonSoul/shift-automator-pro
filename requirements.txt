@@ -1,6 +1,6 @@
 # Runtime dependencies for Shift Automator
 # These are required for the application to run
 
-pywin32>=306
+pywin32>=306; platform_system == "Windows"
 
 tkcalendar==1.6.1

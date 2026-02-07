@@ -11,7 +11,12 @@ from typing import Optional, Tuple
 
 from .logger import get_logger
 
-__all__ = ["validate_folder_path", "validate_file_path", "sanitize_filename", "is_path_within_base"]
+__all__ = [
+    "validate_folder_path",
+    "validate_file_path",
+    "sanitize_filename",
+    "is_path_within_base",
+]
 
 logger = get_logger(__name__)
 
@@ -57,7 +62,9 @@ def validate_folder_path(path: str) -> Tuple[bool, Optional[str]]:
         return False, f"Error accessing path: {e}"
 
 
-def validate_file_path(path: str, allowed_extensions: Optional[list[str]] = None) -> Tuple[bool, Optional[str]]:
+def validate_file_path(
+    path: str, allowed_extensions: Optional[list[str]] = None
+) -> Tuple[bool, Optional[str]]:
     """
     Validate that a file path is safe and has an allowed extension.
 
@@ -83,7 +90,10 @@ def validate_file_path(path: str, allowed_extensions: Optional[list[str]] = None
         if allowed_extensions:
             ext = abs_path.suffix.lower()
             if ext not in [e.lower() for e in allowed_extensions]:
-                return False, f"File extension '{ext}' not allowed. Allowed: {allowed_extensions}"
+                return (
+                    False,
+                    f"File extension '{ext}' not allowed. Allowed: {allowed_extensions}",
+                )
 
         # Check if file is readable
         if not os.access(abs_path, os.R_OK):
@@ -111,13 +121,13 @@ def sanitize_filename(filename: str) -> str:
         Sanitized filename
     """
     # Remove path separators and other dangerous characters
-    dangerous_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+    dangerous_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
     sanitized = filename
     for char in dangerous_chars:
-        sanitized = sanitized.replace(char, '_')
+        sanitized = sanitized.replace(char, "_")
 
     # Remove leading/trailing dots and spaces
-    sanitized = sanitized.strip('. ')
+    sanitized = sanitized.strip(". ")
 
     # Limit length
     if len(sanitized) > 255:

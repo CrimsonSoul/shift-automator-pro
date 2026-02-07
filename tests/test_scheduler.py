@@ -5,7 +5,12 @@ Unit tests for scheduler module.
 import pytest
 from datetime import date
 
-from src.scheduler import is_third_thursday, get_shift_template_name, validate_date_range, get_date_range
+from src.scheduler import (
+    is_third_thursday,
+    get_shift_template_name,
+    validate_date_range,
+    get_date_range,
+)
 
 
 class TestIsThirdThursday:
@@ -42,7 +47,6 @@ class TestIsThirdThursday:
     def test_second_thursday_may_2026(self):
         """May 14, 2026 is the second Thursday."""
         assert is_third_thursday(date(2026, 5, 14)) is False
-
 
 
 class TestGetShiftTemplateName:
@@ -125,11 +129,7 @@ class TestGetDateRange:
         start = date(2026, 1, 1)
         end = date(2026, 1, 3)
         result = get_date_range(start, end)
-        assert result == [
-            date(2026, 1, 1),
-            date(2026, 1, 2),
-            date(2026, 1, 3)
-        ]
+        assert result == [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3)]
 
     def test_week_range(self):
         """Week range should return 7 dates."""
@@ -150,7 +150,6 @@ class TestGetDateRange:
     def test_range_too_large_raises_error(self):
         """Range exceeding MAX_DAYS_RANGE should raise ValueError."""
         start = date(2026, 1, 1)
-        end = date(2027, 1, 2) # 367 days
+        end = date(2027, 1, 2)  # 367 days
         with pytest.raises(ValueError, match="Date range exceeds maximum allowed"):
             get_date_range(start, end)
-

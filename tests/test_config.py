@@ -21,30 +21,35 @@ class TestAppConfig:
         assert config.day_folder == ""
         assert config.night_folder == ""
         assert config.printer_name == ""
+        assert config.headers_footers_only is False
 
     def test_with_values(self):
         """Config should store provided values."""
         config = AppConfig(
             day_folder="/path/to/day",
             night_folder="/path/to/night",
-            printer_name="My Printer"
+            printer_name="My Printer",
+            headers_footers_only=True,
         )
         assert config.day_folder == "/path/to/day"
         assert config.night_folder == "/path/to/night"
         assert config.printer_name == "My Printer"
+        assert config.headers_footers_only is True
 
     def test_to_dict(self):
         """Config should convert to dictionary."""
         config = AppConfig(
             day_folder="/path/to/day",
             night_folder="/path/to/night",
-            printer_name="My Printer"
+            printer_name="My Printer",
+            headers_footers_only=True,
         )
         result = config.to_dict()
         assert result == {
             "day_folder": "/path/to/day",
             "night_folder": "/path/to/night",
-            "printer_name": "My Printer"
+            "printer_name": "My Printer",
+            "headers_footers_only": True,
         }
 
     def test_from_dict(self):
@@ -52,12 +57,14 @@ class TestAppConfig:
         data = {
             "day_folder": "/path/to/day",
             "night_folder": "/path/to/night",
-            "printer_name": "My Printer"
+            "printer_name": "My Printer",
+            "headers_footers_only": True,
         }
         config = AppConfig.from_dict(data)
         assert config.day_folder == "/path/to/day"
         assert config.night_folder == "/path/to/night"
         assert config.printer_name == "My Printer"
+        assert config.headers_footers_only is True
 
     def test_from_dict_with_missing_keys(self):
         """Config should use defaults for missing keys."""
@@ -66,6 +73,7 @@ class TestAppConfig:
         assert config.day_folder == "/path/to/day"
         assert config.night_folder == ""
         assert config.printer_name == ""
+        assert config.headers_footers_only is False
 
     def test_validate_with_valid_folders(self, tmp_path):
         """Validation should pass with valid folders."""
@@ -77,7 +85,7 @@ class TestAppConfig:
         config = AppConfig(
             day_folder=str(day_folder),
             night_folder=str(night_folder),
-            printer_name="My Printer"
+            printer_name="My Printer",
         )
         is_valid, error = config.validate()
         assert is_valid is True
@@ -86,32 +94,26 @@ class TestAppConfig:
     def test_validate_with_invalid_day_folder(self):
         """Validation should fail with non-existent day folder."""
         config = AppConfig(
-            day_folder="/nonexistent/path",
-            night_folder="",
-            printer_name="My Printer"
+            day_folder="/nonexistent/path", night_folder="", printer_name="My Printer"
         )
         is_valid, error = config.validate()
         assert is_valid is False
+        assert error is not None
         assert "does not exist" in error
 
     def test_validate_with_invalid_night_folder(self):
         """Validation should fail with non-existent night folder."""
         config = AppConfig(
-            day_folder="",
-            night_folder="/nonexistent/path",
-            printer_name="My Printer"
+            day_folder="", night_folder="/nonexistent/path", printer_name="My Printer"
         )
         is_valid, error = config.validate()
         assert is_valid is False
+        assert error is not None
         assert "does not exist" in error
 
     def test_validate_with_empty_folders(self):
         """Validation should pass with empty folders."""
-        config = AppConfig(
-            day_folder="",
-            night_folder="",
-            printer_name="My Printer"
-        )
+        config = AppConfig(day_folder="", night_folder="", printer_name="My Printer")
         is_valid, error = config.validate()
         assert is_valid is True
         assert error is None
@@ -138,7 +140,7 @@ class TestConfigManager:
         original_config = AppConfig(
             day_folder="/path/to/day",
             night_folder="/path/to/night",
-            printer_name="My Printer"
+            printer_name="My Printer",
         )
         manager.save(original_config)
 
@@ -177,7 +179,7 @@ class TestConfigManager:
         new_config = AppConfig(
             day_folder="/new/path",
             night_folder="/new/night",
-            printer_name="New Printer"
+            printer_name="New Printer",
         )
         manager.config = new_config
 

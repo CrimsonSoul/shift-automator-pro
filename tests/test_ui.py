@@ -8,6 +8,7 @@ import pytest
 
 from src.ui import ScheduleAppUI
 
+
 class TestScheduleAppUI:
     """Tests for ScheduleAppUI class."""
 
@@ -21,19 +22,31 @@ class TestScheduleAppUI:
     def ui(self, root):
         """Create a ScheduleAppUI instance."""
         # Mock win32print and widget creation to avoid Tcl errors
-        with patch("win32print.EnumPrinters", return_value=[]), \
-             patch("src.ui.ttk.Style"), \
-             patch("src.ui.ttk.Frame"), \
-             patch("src.ui.ttk.Label"), \
-             patch("src.ui.ttk.LabelFrame"), \
-             patch("src.ui.ttk.Entry"), \
-             patch("src.ui.ttk.Button"), \
-             patch("src.ui.ttk.OptionMenu"), \
-             patch("src.ui.ttk.Progressbar"), \
-             patch("src.ui.tk.Button"), \
-             patch("src.ui.tk.StringVar"), \
-             patch("src.ui.tk.DoubleVar"), \
-             patch("src.ui.DateEntry"):
+        with patch("win32print.EnumPrinters", return_value=[]), patch(
+            "src.ui.ttk.Style"
+        ), patch("src.ui.ttk.Frame"), patch("src.ui.ttk.Label"), patch(
+            "src.ui.ttk.LabelFrame"
+        ), patch(
+            "src.ui.ttk.Entry"
+        ), patch(
+            "src.ui.ttk.Button"
+        ), patch(
+            "src.ui.ttk.Checkbutton"
+        ), patch(
+            "src.ui.ttk.OptionMenu"
+        ), patch(
+            "src.ui.ttk.Progressbar"
+        ), patch(
+            "src.ui.tk.Button"
+        ), patch(
+            "src.ui.tk.StringVar"
+        ), patch(
+            "src.ui.tk.DoubleVar"
+        ), patch(
+            "src.ui.tk.BooleanVar"
+        ), patch(
+            "src.ui.DateEntry"
+        ):
             ui = ScheduleAppUI(root)
             # Manually assign mock widgets for testing
             ui.day_entry = MagicMock()
@@ -42,6 +55,7 @@ class TestScheduleAppUI:
             ui.status_label = MagicMock()
             ui.progress_var = MagicMock()
             ui.printer_var = MagicMock()
+            ui.headers_only_var = MagicMock()
             yield ui
 
     def test_init(self, ui):
@@ -82,3 +96,8 @@ class TestScheduleAppUI:
         mock_cmd = MagicMock()
         ui.set_start_command(mock_cmd)
         ui.print_btn.config.assert_called_with(command=mock_cmd)
+
+    def test_get_headers_footers_only(self, ui):
+        """Should return boolean from headers-only var."""
+        ui.headers_only_var.get.return_value = True
+        assert ui.get_headers_footers_only() is True

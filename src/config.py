@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from .constants import CONFIG_FILENAME
+from .app_paths import get_data_dir
 from .logger import get_logger
 
 __all__ = ["AppConfig", "ConfigManager"]
@@ -21,21 +22,24 @@ logger = get_logger(__name__)
 @dataclass
 class AppConfig:
     """Application configuration data class."""
+
     day_folder: str = ""
     night_folder: str = ""
     printer_name: str = ""
+    headers_footers_only: bool = False
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AppConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
         """Create config from dictionary."""
         return cls(
             day_folder=data.get("day_folder", ""),
             night_folder=data.get("night_folder", ""),
-            printer_name=data.get("printer_name", "")
+            printer_name=data.get("printer_name", ""),
+            headers_footers_only=bool(data.get("headers_footers_only", False)),
         )
 
     def validate(self) -> tuple[bool, Optional[str]]:
@@ -62,7 +66,12 @@ class ConfigManager:
         Args:
             config_path: Path to config file (default: CONFIG_FILENAME in current directory)
         """
-        self.config_path = Path(config_path) if config_path else Path(CONFIG_FILENAME)
+        self._legacy_config_path = Path(CONFIG_FILENAME)
+        self._allow_legacy_migration = config_path is None
+        if config_path:
+            self.config_path = Path(config_path)
+        else:
+            self.config_path = get_data_dir() / CONFIG_FILENAME
         self._config: Optional[AppConfig] = None
 
     def load(self) -> AppConfig:
@@ -77,6 +86,28 @@ class ConfigManager:
             IOError: If config file cannot be read
         """
         if not self.config_path.exists():
+            # Backward-compatibility: older versions stored config.json in the working directory.
+            if self._allow_legacy_migration and self._legacy_config_path.exists():
+                try:
+                    with open(self._legacy_config_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        self._config = AppConfig.from_dict(data)
+                        logger.info(
+                            f"Configuration loaded from legacy path {self._legacy_config_path}; "
+                            f"migrating to {self.config_path}"
+                        )
+                        try:
+                            self.save(self._config)
+                        except Exception as e:
+                            logger.warning(
+                                f"Could not migrate legacy config to {self.config_path}: {e}"
+                            )
+                        return self._config
+                except Exception as e:
+                    logger.warning(
+                        f"Could not load legacy config at {self._legacy_config_path}: {e}"
+                    )
+
             logger.info(f"Config file not found at {self.config_path}, using defaults")
             self._config = AppConfig()
             return self._config
@@ -113,10 +144,16 @@ class ConfigManager:
             # Ensure parent directory exists
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            # Write atomically: write to a temp file then replace.
+            tmp_path = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(config_to_save.to_dict(), f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+
+            os.replace(tmp_path, self.config_path)
             logger.info(f"Configuration saved to {self.config_path}")
-        except IOError as e:
+        except (IOError, OSError) as e:
             logger.error(f"Error saving config file: {e}")
             raise
 

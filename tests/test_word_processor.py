@@ -10,6 +10,7 @@ from datetime import date
 
 from src.word_processor import WordProcessor
 
+
 class TestWordProcessor:
     """Tests for WordProcessor class."""
 
@@ -17,8 +18,9 @@ class TestWordProcessor:
     def wp(self):
         """Create a WordProcessor instance."""
         # Patch pythoncom and win32com to avoid errors during initialization
-        with patch("pythoncom.CoInitialize"), \
-             patch("win32com.client.Dispatch"):
+        with patch("pythoncom.CoInitialize"), patch(
+            "src.word_processor.win32_client.Dispatch"
+        ):
             wp = WordProcessor()
             yield wp
 
@@ -33,7 +35,7 @@ class TestWordProcessor:
         # Create dummy templates
         (tmp_path / "Monday.docx").write_text("dummy")
         (tmp_path / "Tuesday.docx").write_text("dummy")
-        
+
         result = wp.find_template_file(str(tmp_path), "Monday")
         assert result is not None
         assert result.endswith("Monday.docx")
@@ -41,24 +43,23 @@ class TestWordProcessor:
     def test_find_template_file_cache_usage(self, wp, tmp_path):
         """Should use cache for subsequent lookups."""
         (tmp_path / "Monday.docx").write_text("dummy")
-        
+
         # First call builds cache
         wp.find_template_file(str(tmp_path), "Monday")
         assert str(tmp_path.resolve()) in wp._template_cache
-        
+
         # Modify folder (add file) but cache should still be used
         (tmp_path / "Tuesday.docx").write_text("dummy")
         result = wp.find_template_file(str(tmp_path), "Tuesday")
-        # Tuesday wasn't in cache, so it should NOT be found if cache is strict
-        # Wait, the current implementation checks if folder is in cache.
-        # If folder is in cache, it only looks at that cache.
-        assert result is None 
+        # Implementation refreshes the folder cache once on a miss.
+        assert result is not None
+        assert result.endswith("Tuesday.docx")
 
     def test_robust_template_matching(self, wp, tmp_path):
         """Should match 'Thursday Night' when searching for 'Thursday' if unique."""
         (tmp_path / "Thursday Night.docx").write_text("dummy")
         (tmp_path / "Friday.docx").write_text("dummy")
-        
+
         result = wp.find_template_file(str(tmp_path), "Thursday")
         assert result is not None
         assert result.endswith("Thursday Night.docx")
@@ -66,7 +67,7 @@ class TestWordProcessor:
     def test_robust_template_matching_boundary(self, wp, tmp_path):
         """Should NOT match 'THIRD Thursday' when searching for 'Thursday'."""
         (tmp_path / "THIRD Thursday.docx").write_text("dummy")
-        
+
         result = wp.find_template_file(str(tmp_path), "Thursday")
         assert result is None
 
@@ -74,7 +75,7 @@ class TestWordProcessor:
         """Should handle ambiguous matches gracefully."""
         (tmp_path / "Thursday.docx").write_text("dummy")
         (tmp_path / "Thursday Night.docx").write_text("dummy")
-        
+
         # "Thursday" matches both. It should prefer the one starting with "Thursday"
         # or the exact match.
         result = wp.find_template_file(str(tmp_path), "Thursday")
@@ -84,10 +85,11 @@ class TestWordProcessor:
     def test_replace_dates_logic(self, wp):
         """Should call find/replace with correct patterns."""
         mock_doc = MagicMock()
-        current_date = date(2026, 1, 15) # Thursday
+        current_date = date(2026, 1, 15)  # Thursday
 
-        with patch.object(wp, "_normalize_spaces_in_doc"), \
-             patch.object(wp, "_execute_replace", return_value=True) as mock_exec:
+        with patch.object(wp, "_normalize_spaces_in_doc"), patch.object(
+            wp, "_execute_replace", return_value=True
+        ) as mock_exec:
             wp.replace_dates(mock_doc, current_date)
 
             # Should be called 4 times (for 4 patterns)
@@ -99,8 +101,28 @@ class TestWordProcessor:
             calls = [c[0][2] for c in mock_exec.call_args_list]
             assert "Thursday, January 15, 2026" in calls
 
+    def test_replace_dates_headers_only_passes_filter(self, wp):
+        """headers_footers_only should pass a story-type filter through."""
+
+        mock_doc = MagicMock()
+        current_date = date(2026, 1, 15)
+
+        with patch.object(wp, "_normalize_spaces_in_doc") as mock_norm, patch.object(
+            wp, "_execute_replace", return_value=False
+        ) as mock_exec:
+            wp.replace_dates(mock_doc, current_date, headers_footers_only=True)
+
+        assert mock_norm.call_count == 1
+        # allowed_story_types is passed as kwarg
+        assert "allowed_story_types" in mock_norm.call_args.kwargs
+        assert mock_norm.call_args.kwargs["allowed_story_types"] is not None
+
+        assert mock_exec.call_count == 4
+        assert "allowed_story_types" in mock_exec.call_args.kwargs
+        assert mock_exec.call_args.kwargs["allowed_story_types"] is not None
+
     @patch("src.word_processor.pythoncom.CoInitialize")
-    @patch("src.word_processor.win32com.client.Dispatch")
+    @patch("src.word_processor.win32_client.Dispatch")
     def test_initialize_success(self, mock_dispatch, mock_coinit):
         """Initialize should set up COM correctly."""
         # Create a fresh WordProcessor without the fixture's patches
@@ -118,19 +140,19 @@ class TestWordProcessor:
         mock_func.side_effect = [
             Exception("Call was rejected by callee"),
             Exception("Rejected"),
-            "Success"
+            "Success",
         ]
-        
-        with patch("time.sleep"): # Don't actually wait
+
+        with patch("time.sleep"):  # Don't actually wait
             result = wp.safe_com_call(mock_func, "arg1", retries=3)
-            
+
         assert result == "Success"
         assert mock_func.call_count == 3
 
     def test_safe_com_call_fail(self, wp):
         """Safe COM call should eventually fail."""
         mock_func = MagicMock(side_effect=Exception("Permanent Failure"))
-        
+
         with pytest.raises(Exception, match="Permanent Failure"):
             wp.safe_com_call(mock_func, retries=2)
 
@@ -171,9 +193,9 @@ class TestWordProcessor:
         mock_doc = MagicMock()
         current_date = date(2026, 1, 14)  # Wednesday
 
-        with patch.object(wp, "_normalize_spaces_in_doc"), \
-             patch.object(wp, "_execute_replace", return_value=False), \
-             patch("src.word_processor.logger") as mock_logger:
+        with patch.object(wp, "_normalize_spaces_in_doc"), patch.object(
+            wp, "_execute_replace", return_value=False
+        ), patch("src.word_processor.logger") as mock_logger:
             wp.replace_dates(mock_doc, current_date)
             mock_logger.warning.assert_called()
 
@@ -184,15 +206,16 @@ class TestWordProcessor:
 
         call_order = []
 
-        def track_normalize(doc):
+        def track_normalize(doc, **kwargs):
             call_order.append("normalize")
 
-        def track_execute(doc, find_text, replace_text):
+        def track_execute(doc, find_text, replace_text, **kwargs):
             call_order.append("execute")
             return False
 
-        with patch.object(wp, "_normalize_spaces_in_doc", side_effect=track_normalize), \
-             patch.object(wp, "_execute_replace", side_effect=track_execute):
+        with patch.object(
+            wp, "_normalize_spaces_in_doc", side_effect=track_normalize
+        ), patch.object(wp, "_execute_replace", side_effect=track_execute):
             wp.replace_dates(mock_doc, current_date)
 
         assert call_order[0] == "normalize"
@@ -215,7 +238,7 @@ class TestWordProcessor:
         assert result is False
 
     @patch("src.word_processor.pythoncom.CoInitialize")
-    @patch("src.word_processor.win32com.client.Dispatch")
+    @patch("src.word_processor.win32_client.Dispatch")
     def test_context_manager_enter_exit(self, mock_dispatch, mock_coinit):
         """Context manager should initialize on enter and shutdown on exit."""
         wp = WordProcessor()
@@ -236,10 +259,10 @@ class TestWordProcessor:
 
         # Manually place a malicious path in the cache
         folder_path = str(tmp_path.resolve())
-        wp._template_cache[folder_path] = {
-            "thursday": "/etc/passwd"
-        }
+        wp._template_cache[folder_path] = {"thursday": "/etc/passwd"}
 
-        success, error = wp.print_document(str(tmp_path), "Thursday", date(2026, 1, 15), "Printer")
+        success, error = wp.print_document(
+            str(tmp_path), "Thursday", date(2026, 1, 15), "Printer"
+        )
         assert success is False
         assert "outside" in error.lower()

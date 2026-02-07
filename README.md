@@ -10,16 +10,18 @@ A high-performance, modern desktop application for automating the management and
 - **Third Thursday Detection**: Intelligent logic for monthly clinical rotation templates
 - **Midnight Aesthetic**: Fluent Design inspired dark mode for professional environments
 - **Batch Processing**: Print any date range with automated header/footer date updates
+- **Preflight Checks**: Validates templates and printer selection before printing
 - **Portable**: Built for Windows as a single standalone executable
 - **Comprehensive Logging**: Detailed logging for debugging and troubleshooting
 - **Input Validation**: Robust validation of all user inputs
 - **Error Recovery**: Graceful handling of errors with detailed failure summaries
+- **Failure Reports**: Automatically writes a CSV report when prints fail
 
 ## 🛠️ Installation
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.10 or higher (recommended: 3.12)
 - Microsoft Word (required for document processing)
 - Windows operating system
 
@@ -63,7 +65,13 @@ On first launch, you will be prompted to select:
 2. **Night Shift Folder**: Where your nighttime clinical templates are stored
 3. **Printer**: Your target local or network printer
 
-Settings are saved automatically to `config.json`.
+Settings are saved automatically to `%APPDATA%\Shift Automator Pro\config.json`.
+
+Advanced option:
+- "Replace dates in headers/footers only" can reduce unintended replacements in document bodies.
+
+Tip:
+- Use the "Open Logs" button in the app footer to open the configuration/log/report folder.
 
 ## 📁 Project Structure
 
@@ -100,6 +108,8 @@ Run the test suite:
 ```bash
 # Install development dependencies
 pip install -r requirements-dev.txt
+
+# On non-Windows systems, Windows-only dependencies (like pywin32) are skipped automatically.
 
 # Run tests
 pytest
@@ -143,11 +153,17 @@ The executable will be created in the `dist/` directory.
 
 **Printer not listed**: Check that the printer is properly installed and accessible.
 
+Tip: Click the "Refresh" button next to the printer dropdown.
+
 **Template not found**: Verify that template files exist in the specified folders and have the correct naming convention.
 
 ### Logs
 
-The application creates a log file (`shift_automator.log`) in the application directory. Check this file for detailed error information.
+The application creates a log file at `%APPDATA%\Shift Automator Pro\shift_automator.log`. Check this file for detailed error information.
+
+### Failure Reports
+
+If any documents fail to print, the app writes a CSV report to `%APPDATA%\Shift Automator Pro\failure_report_YYYYMMDD_HHMMSS.csv`.
 
 ## 📄 License
 

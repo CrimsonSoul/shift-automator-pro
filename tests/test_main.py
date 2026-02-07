@@ -22,15 +22,18 @@ class TestShiftAutomatorApp:
     @pytest.fixture
     def app(self):
         """Create a ShiftAutomatorApp with mocked UI and dependencies."""
-        with patch.object(main_module, "ScheduleAppUI") as MockUI, \
-             patch.object(main_module, "ConfigManager") as MockConfig:
+        with patch.object(main_module, "ScheduleAppUI") as MockUI, patch.object(
+            main_module, "ConfigManager"
+        ) as MockConfig:
             mock_root = MagicMock()
             mock_ui = MockUI.return_value
             mock_ui.get_day_folder.return_value = "/tmp/day"
             mock_ui.get_night_folder.return_value = "/tmp/night"
             mock_ui.get_printer_name.return_value = "Test Printer"
+            mock_ui.get_available_printers.return_value = ["Test Printer"]
             mock_ui.get_start_date.return_value = date(2026, 1, 14)
             mock_ui.get_end_date.return_value = date(2026, 1, 14)
+            mock_ui.get_headers_footers_only.return_value = False
             mock_ui.progress_var = MagicMock()
             mock_ui.progress_var.get.return_value = 0.0
             mock_ui.print_btn = MagicMock()
@@ -64,13 +67,39 @@ class TestShiftAutomatorApp:
         assert is_valid is False
         assert "printer" in error.lower()
 
+    def test_validate_inputs_printer_not_available(self, app):
+        """Should fail validation when printer is not in enumerated list."""
+        app.ui.get_printer_name.return_value = "Some Printer"
+        app.ui.get_available_printers.return_value = ["Other Printer"]
+        with patch.object(
+            main_module, "validate_folder_path", return_value=(True, None)
+        ):
+            is_valid, error = app._validate_inputs()
+        assert is_valid is False
+        assert "not available" in (error or "").lower()
+
     def test_validate_inputs_missing_dates(self, app):
         """Should fail validation when dates are missing."""
         app.ui.get_start_date.return_value = None
-        with patch.object(main_module, "validate_folder_path", return_value=(True, None)):
+        with patch.object(
+            main_module, "validate_folder_path", return_value=(True, None)
+        ):
             is_valid, error = app._validate_inputs()
         assert is_valid is False
         assert "date" in error.lower()
+
+    def test_validate_inputs_success(self, app):
+        """Should validate inputs when environment and templates look good."""
+
+        with patch.object(
+            main_module, "validate_folder_path", return_value=(True, None)
+        ), patch.object(main_module, "WordProcessor") as MockWP:
+            mock_wp = MockWP.return_value
+            mock_wp.find_template_file.return_value = "/tmp/template.docx"
+            is_valid, error = app._validate_inputs()
+
+        assert is_valid is True
+        assert error is None
 
     @patch.object(main_module, "WordProcessor")
     @patch.object(main_module, "validate_folder_path", return_value=(True, None))
@@ -83,11 +112,11 @@ class TestShiftAutomatorApp:
         mock_wp_class.return_value = mock_wp
 
         params = {
-            'start_date': date(2026, 1, 14),
-            'end_date': date(2026, 1, 14),
-            'day_folder': '/tmp/day',
-            'night_folder': '/tmp/night',
-            'printer_name': 'Test Printer',
+            "start_date": date(2026, 1, 14),
+            "end_date": date(2026, 1, 14),
+            "day_folder": "/tmp/day",
+            "night_folder": "/tmp/night",
+            "printer_name": "Test Printer",
         }
 
         app._process_batch(params)
@@ -109,11 +138,11 @@ class TestShiftAutomatorApp:
         app._cancel_event.set()
 
         params = {
-            'start_date': date(2026, 1, 14),
-            'end_date': date(2026, 1, 16),
-            'day_folder': '/tmp/day',
-            'night_folder': '/tmp/night',
-            'printer_name': 'Test Printer',
+            "start_date": date(2026, 1, 14),
+            "end_date": date(2026, 1, 16),
+            "day_folder": "/tmp/day",
+            "night_folder": "/tmp/night",
+            "printer_name": "Test Printer",
         }
 
         app._process_batch(params)
@@ -136,11 +165,11 @@ class TestShiftAutomatorApp:
         mock_wp_class.return_value = mock_wp
 
         params = {
-            'start_date': date(2026, 1, 14),
-            'end_date': date(2026, 1, 14),
-            'day_folder': '/tmp/day',
-            'night_folder': '/tmp/night',
-            'printer_name': 'Test Printer',
+            "start_date": date(2026, 1, 14),
+            "end_date": date(2026, 1, 14),
+            "day_folder": "/tmp/day",
+            "night_folder": "/tmp/night",
+            "printer_name": "Test Printer",
         }
 
         app._process_batch(params)
