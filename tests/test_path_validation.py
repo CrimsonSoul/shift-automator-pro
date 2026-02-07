@@ -185,6 +185,51 @@ class TestSanitizeFilename:
         assert result == "_unnamed"
 
 
+    def test_reserved_device_name_con(self):
+        """Windows reserved name CON should be prefixed."""
+        result = sanitize_filename("CON.docx")
+        assert result == "_CON.docx"
+
+    def test_reserved_device_name_nul(self):
+        """Windows reserved name NUL should be prefixed."""
+        result = sanitize_filename("NUL.txt")
+        assert result == "_NUL.txt"
+
+    def test_reserved_device_name_com1(self):
+        """Windows reserved name COM1 should be prefixed."""
+        result = sanitize_filename("COM1")
+        assert result == "_COM1"
+
+    def test_reserved_device_name_case_insensitive(self):
+        """Reserved name check should be case-insensitive."""
+        result = sanitize_filename("con.docx")
+        assert result == "_con.docx"
+
+    def test_non_reserved_name_passes(self):
+        """Non-reserved name like CONTROL should NOT be prefixed."""
+        result = sanitize_filename("CONTROL.docx")
+        assert result == "CONTROL.docx"
+
+    def test_long_filename_preserves_extension(self):
+        """Long filename truncation should preserve the file extension."""
+        long_name = "a" * 300 + ".docx"
+        result = sanitize_filename(long_name)
+        assert len(result) <= 255
+        assert result.endswith(".docx")
+
+    def test_long_filename_no_extension(self):
+        """Long filename without extension should truncate directly."""
+        long_name = "a" * 300
+        result = sanitize_filename(long_name)
+        assert len(result) == 255
+        assert "." not in result
+
+    def test_only_spaces(self):
+        """Filename with only spaces should return a safe fallback."""
+        result = sanitize_filename("   ")
+        assert result == "_unnamed"
+
+
 class TestIsPathWithinBase:
     """Tests for is_path_within_base function."""
 

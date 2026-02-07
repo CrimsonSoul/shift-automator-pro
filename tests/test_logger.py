@@ -113,3 +113,30 @@ class TestGetLogger:
         """Should return 'shift_automator' when name is None."""
         logger = get_logger(None)
         assert logger.name == "shift_automator"
+
+
+class TestSetupLoggingIdempotency:
+    """Tests for re-initialization idempotency."""
+
+    def test_double_init_does_not_duplicate_handlers(self, tmp_path):
+        """Calling setup_logging twice should not leave duplicate tagged handlers."""
+        root = logging.getLogger()
+
+        # Record third-party handlers before our test
+        pre_existing = len([h for h in root.handlers if not getattr(h, "_shift_automator", False)])
+
+        setup_logging(log_dir=str(tmp_path))
+        tagged_after_first = [h for h in root.handlers if getattr(h, "_shift_automator", False)]
+        count_first = len(tagged_after_first)
+
+        setup_logging(log_dir=str(tmp_path))
+        tagged_after_second = [h for h in root.handlers if getattr(h, "_shift_automator", False)]
+        count_second = len(tagged_after_second)
+
+        # Should have exactly the same number of tagged handlers (2: file + console)
+        assert count_first == 2
+        assert count_second == 2
+
+        # Third-party handlers should be untouched
+        third_party_after = len([h for h in root.handlers if not getattr(h, "_shift_automator", False)])
+        assert third_party_after == pre_existing

@@ -73,6 +73,31 @@ class TestAppConfig:
         assert config.headers_footers_only is False
 
 
+    def test_from_dict_coerces_null_to_empty_string(self):
+        """from_dict should coerce None values to empty strings."""
+        data = {"day_folder": None, "night_folder": None, "printer_name": None}
+        config = AppConfig.from_dict(data)
+        assert config.day_folder == ""
+        assert config.night_folder == ""
+        assert config.printer_name == ""
+
+    def test_from_dict_coerces_int_to_string(self):
+        """from_dict should coerce non-string values to strings."""
+        data = {"day_folder": 123, "night_folder": 456}
+        config = AppConfig.from_dict(data)
+        assert config.day_folder == "123"
+        assert config.night_folder == "456"
+
+    def test_from_dict_bool_coercion(self):
+        """from_dict should coerce truthy/falsy values for headers_footers_only."""
+        config = AppConfig.from_dict({"headers_footers_only": 1})
+        assert config.headers_footers_only is True
+        config = AppConfig.from_dict({"headers_footers_only": "yes"})
+        assert config.headers_footers_only is True
+        config = AppConfig.from_dict({"headers_footers_only": 0})
+        assert config.headers_footers_only is False
+
+
 class TestConfigManager:
     """Tests for ConfigManager class."""
 

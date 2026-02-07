@@ -8,6 +8,8 @@ from datetime import date
 from src.scheduler import (
     is_third_thursday,
     get_shift_template_name,
+    get_english_day_name,
+    get_english_month_name,
     validate_date_range,
     get_date_range,
 )
@@ -153,3 +155,60 @@ class TestGetDateRange:
         end = date(2027, 1, 2)  # 367 days
         with pytest.raises(ValueError, match="Date range exceeds maximum allowed"):
             get_date_range(start, end)
+
+
+class TestGetEnglishDayName:
+    """Tests for get_english_day_name function."""
+
+    @pytest.mark.parametrize(
+        "dt, expected",
+        [
+            (date(2026, 1, 12), "Monday"),
+            (date(2026, 1, 13), "Tuesday"),
+            (date(2026, 1, 14), "Wednesday"),
+            (date(2026, 1, 15), "Thursday"),
+            (date(2026, 1, 16), "Friday"),
+            (date(2026, 1, 17), "Saturday"),
+            (date(2026, 1, 18), "Sunday"),
+        ],
+    )
+    def test_all_day_names(self, dt, expected):
+        """get_english_day_name should return the correct English name for each weekday."""
+        assert get_english_day_name(dt) == expected
+
+    def test_returns_string(self):
+        """get_english_day_name should always return a string."""
+        result = get_english_day_name(date(2026, 6, 15))
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+
+class TestGetEnglishMonthName:
+    """Tests for get_english_month_name function."""
+
+    @pytest.mark.parametrize(
+        "dt, expected",
+        [
+            (date(2026, 1, 1), "January"),
+            (date(2026, 2, 1), "February"),
+            (date(2026, 3, 1), "March"),
+            (date(2026, 4, 1), "April"),
+            (date(2026, 5, 1), "May"),
+            (date(2026, 6, 1), "June"),
+            (date(2026, 7, 1), "July"),
+            (date(2026, 8, 1), "August"),
+            (date(2026, 9, 1), "September"),
+            (date(2026, 10, 1), "October"),
+            (date(2026, 11, 1), "November"),
+            (date(2026, 12, 1), "December"),
+        ],
+    )
+    def test_all_month_names(self, dt, expected):
+        """get_english_month_name should return the correct English name for each month."""
+        assert get_english_month_name(dt) == expected
+
+    def test_returns_string(self):
+        """get_english_month_name should always return a string."""
+        result = get_english_month_name(date(2026, 6, 15))
+        assert isinstance(result, str)
+        assert len(result) > 0

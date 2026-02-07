@@ -486,6 +486,57 @@ class TestShiftAutomatorApp:
         assert result is None
 
 
+    def test_start_processing_batch_params_strip_quotes(self, app):
+        """start_processing should strip surrounding quotes from folder paths in batch_params."""
+        # Make validation pass
+        app.ui.get_day_folder.return_value = '"C:\\Users\\day"'
+        app.ui.get_night_folder.return_value = "'C:\\Users\\night'"
+
+        captured_params = {}
+
+        def capture_process_batch(params):
+            captured_params.update(params)
+
+        with patch.object(
+            main_module, "validate_folder_path", return_value=(True, None)
+        ), patch.object(main_module, "WordProcessor") as MockWP, patch.object(
+            app, "_process_batch", side_effect=capture_process_batch
+        ):
+            mock_wp = MockWP.return_value
+            mock_wp.find_template_file.return_value = "/tmp/template.docx"
+
+            app.start_processing()
+
+            # Wait for the thread to finish (it runs our mock immediately)
+            if app._processing_thread:
+                app._processing_thread.join(timeout=5)
+
+            assert captured_params["day_folder"] == "C:\\Users\\day"
+            assert captured_params["night_folder"] == "C:\\Users\\night"
+
+    def test_show_failure_summary_with_none_report_path(self, app, tmp_path):
+        """_show_failure_summary should handle report_path=None gracefully."""
+        failures = [
+            {
+                "date": date(2026, 1, 14),
+                "shift": "day",
+                "template": "Wednesday",
+                "error": "Template not found",
+            }
+        ]
+
+        with patch("src.main.get_data_dir", return_value=tmp_path):
+            app._show_failure_summary(failures, report_path=None)
+
+        app.ui.show_warning.assert_called_once()
+        msg = app.ui.show_warning.call_args[0][1]
+        assert "1 operation(s) failed" in msg
+        # Should NOT contain "Failure report saved to" when report_path is None
+        assert "Failure report saved to" not in msg
+        # Should still show the log file path
+        assert "Log file" in msg
+
+
 class TestComputeBatchSize:
     """Tests for _compute_batch_size function."""
 

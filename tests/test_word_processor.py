@@ -423,3 +423,63 @@ class TestWordProcessor:
         # doc.Close is called in the finally via safe_com_call
         close_calls = [c for c in mock_doc.Close.call_args_list]
         assert len(close_calls) >= 1
+
+    def test_print_document_unprotect_fails_and_stays_protected(self, wp, tmp_path):
+        """print_document should return failure when Unprotect fails and doc remains protected."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        # Document is protected and stays protected after Unprotect fails
+        mock_doc.ProtectionType = 3  # PROTECTION_READ_ONLY
+
+        def unprotect_fails():
+            raise Exception("Password required")
+
+        mock_doc.Unprotect = unprotect_fails
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        with patch.object(wp, "safe_com_call", side_effect=lambda f, *a, **kw: f(*a)):
+            success, error = wp.print_document(
+                str(tmp_path), "Wednesday", date(2026, 1, 14), "Printer"
+            )
+
+        assert success is False
+        assert "protected" in error.lower()
+        # PrintOut should NOT have been called (doc was not printable)
+        mock_doc.PrintOut.assert_not_called()
+        # Document should still be closed
+        mock_doc.Close.assert_called()
+
+    def test_print_document_opens_readonly(self, wp, tmp_path):
+        """print_document should open documents with ReadOnly=True (third positional arg)."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        mock_doc.ProtectionType = -1  # PROTECTION_NONE
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        call_log = []
+        def tracking_safe_com_call(f, *a, **kw):
+            call_log.append((f, a, kw))
+            return f(*a)
+
+        with patch.object(wp, "safe_com_call", side_effect=tracking_safe_com_call):
+            with patch.object(wp, "replace_dates"):
+                success, error = wp.print_document(
+                    str(tmp_path), "Wednesday", date(2026, 1, 14), "Printer"
+                )
+
+        assert success is True
+        # The first safe_com_call should be Documents.Open with ReadOnly=True
+        # Documents.Open(filename, False, True) — third arg (True) is ReadOnly
+        open_call = call_log[0]
+        open_args = open_call[1]  # positional args after the function
+        # open_args should be (target_file, False, True)
+        assert len(open_args) >= 3
+        assert open_args[2] is True  # ReadOnly=True
