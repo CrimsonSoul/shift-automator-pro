@@ -562,8 +562,22 @@ class ShiftAutomatorApp:
             self._safe_after(reset_ui)
 
     def _on_close(self) -> None:
-        """Handle window close: cancel any running batch and shut down cleanly."""
+        """Handle window close: persist config, cancel any running batch, and shut down."""
         self._closing = True
+
+        # Persist current UI values so template paths, printer, and options
+        # survive across sessions even if the user never ran a batch.
+        try:
+            config = AppConfig(
+                day_folder=(self.ui.get_day_folder() or "").strip(),
+                night_folder=(self.ui.get_night_folder() or "").strip(),
+                printer_name=(self.ui.get_printer_name() or "").strip(),
+                headers_footers_only=self.ui.get_headers_footers_only(),
+            )
+            self._save_config(config)
+        except Exception as e:
+            logger.warning(f"Could not save config on close: {e}")
+
         if self._processing_thread and self._processing_thread.is_alive():
             logger.info("Window close requested during processing, cancelling...")
             self._cancel_event.set()
