@@ -5,6 +5,7 @@ This module handles date calculations, including special scheduling rules
 like third Thursday detection.
 """
 
+import calendar
 from datetime import date, timedelta
 
 from typing import Optional
@@ -15,11 +16,43 @@ from .logger import get_logger
 __all__ = [
     "is_third_thursday",
     "get_shift_template_name",
+    "get_english_day_name",
+    "get_english_month_name",
     "validate_date_range",
     "get_date_range",
 ]
 
 logger = get_logger(__name__)
+
+# Locale-independent English day and month names.
+# strftime("%A") and strftime("%B") return locale-dependent strings, which
+# breaks template lookup and date replacement on non-English Windows systems.
+_EN_DAY_NAMES: list[str] = list(calendar.day_name)  # Monday=0 .. Sunday=6
+_EN_MONTH_NAMES: list[str] = list(calendar.month_name)  # index 1=January .. 12=December
+
+
+def get_english_day_name(dt: date) -> str:
+    """Return the English day name for *dt*, independent of system locale.
+
+    Args:
+        dt: The date to get the day name for.
+
+    Returns:
+        Full English day name (e.g. ``"Thursday"``).
+    """
+    return _EN_DAY_NAMES[dt.weekday()]
+
+
+def get_english_month_name(dt: date) -> str:
+    """Return the English month name for *dt*, independent of system locale.
+
+    Args:
+        dt: The date to get the month name for.
+
+    Returns:
+        Full English month name (e.g. ``"January"``).
+    """
+    return _EN_MONTH_NAMES[dt.month]
 
 
 def is_third_thursday(dt: date) -> bool:
@@ -64,7 +97,7 @@ def get_shift_template_name(dt: date, shift_type: str = "day") -> str:
     if shift_type not in ("day", "night"):
         raise ValueError(f"shift_type must be 'day' or 'night', got '{shift_type}'")
 
-    day_name = dt.strftime("%A")
+    day_name = get_english_day_name(dt)
 
     if shift_type == "day":
         # Day shift uses "THIRD Thursday" for third Thursdays

@@ -165,7 +165,7 @@ class TestShiftAutomatorApp:
         app._on_close()
 
         assert app._cancel_event.is_set()
-        mock_thread.join.assert_called_once_with(timeout=5)
+        mock_thread.join.assert_called_once_with(timeout=10)
         app.root.destroy.assert_called_once()
 
     def test_cancel_if_running_sets_event(self, app):

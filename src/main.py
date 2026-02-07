@@ -12,6 +12,7 @@ from typing import Any, Optional, Callable, TypedDict
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
+from .scheduler import get_english_day_name
 from .constants import (
     PROGRESS_MAX,
     COLORS,
@@ -91,6 +92,7 @@ class ShiftAutomatorApp:
         self._processing_thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
         self._closing = False
+        self._save_lock = threading.Lock()
 
         # Load and apply saved configuration
         self._load_config()
@@ -149,16 +151,17 @@ class ShiftAutomatorApp:
 
     def _save_config(self, config: AppConfig) -> None:
         """
-        Save configuration.
+        Save configuration (thread-safe).
 
         Args:
             config: Configuration to save
         """
-        try:
-            self.config_manager.save(config)
-            logger.info("Configuration saved successfully")
-        except Exception as e:
-            logger.error(f"Error saving configuration: {e}")
+        with self._save_lock:
+            try:
+                self.config_manager.save(config)
+                logger.info("Configuration saved successfully")
+            except Exception as e:
+                logger.error(f"Error saving configuration: {e}")
 
     def _validate_inputs(self) -> tuple[bool, Optional[str]]:
         """
@@ -167,8 +170,8 @@ class ShiftAutomatorApp:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        day_folder = (self.ui.get_day_folder() or "").strip()
-        night_folder = (self.ui.get_night_folder() or "").strip()
+        day_folder = (self.ui.get_day_folder() or "").strip().strip('"').strip("'")
+        night_folder = (self.ui.get_night_folder() or "").strip().strip('"').strip("'")
         printer_name = (self.ui.get_printer_name() or "").strip()
         start_date = self.ui.get_start_date()
         end_date = self.ui.get_end_date()
@@ -377,6 +380,15 @@ class ShiftAutomatorApp:
         """Schedule a 'Cancelled' status update on the UI thread."""
         self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
 
+    def _reset_ui(self) -> None:
+        """Re-enable all inputs and reset the print button to its default state."""
+        if self._closing:
+            return
+        self.ui.set_inputs_enabled(True)
+        if self.ui.print_btn:
+            self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent)
+        self.ui.set_print_button_state("normal")
+
     def _print_shift(
         self,
         word_proc: WordProcessor,
@@ -404,9 +416,9 @@ class ShiftAutomatorApp:
             headers_footers_only: Whether to limit date replacement to headers/footers.
             failed_operations: Mutable list to append failure records to.
         """
-        day_name = current_date.strftime("%A")
+        day_name = get_english_day_name(current_date)
         display_date = current_date.strftime("%m/%d/%Y")
-        progress = (job_index / max(total_jobs, 1)) * 100
+        progress = ((job_index + 1) / max(total_jobs, 1)) * 100
         msg = (
             f"Printing {shift_label} Shift: {day_name} {display_date} "
             f"({job_index + 1}/{total_jobs})..."
@@ -450,6 +462,7 @@ class ShiftAutomatorApp:
 
         if not start_date or not end_date:
             logger.error("Attempted to process batch with missing dates")
+            self._safe_after(self._reset_ui)
             return
 
         day_folder = params["day_folder"]
@@ -550,38 +563,41 @@ class ShiftAutomatorApp:
             err_msg = f"An error occurred during processing: {type(e).__name__}: {e}"
             self._safe_after(lambda: self.ui.show_error("Processing Error", err_msg))
         finally:
-            # Re-enable button and reset text
-            def reset_ui() -> None:
-                if self._closing:
-                    return
-                self.ui.set_inputs_enabled(True)
-                if self.ui.print_btn:
-                    self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent)
-                self.ui.set_print_button_state("normal")
-
-            self._safe_after(reset_ui)
+            self._safe_after(self._reset_ui)
 
     def _on_close(self) -> None:
         """Handle window close: persist config, cancel any running batch, and shut down."""
         self._closing = True
 
+        # Cancel any active batch first so the worker thread stops ASAP.
+        if self._processing_thread and self._processing_thread.is_alive():
+            logger.info("Window close requested during processing, cancelling...")
+            self._cancel_event.set()
+            # Wait generously for the current COM call to complete.
+            self._processing_thread.join(timeout=10)
+            if self._processing_thread.is_alive():
+                logger.warning(
+                    "Worker thread did not exit within timeout; "
+                    "window will close but a print job may still complete."
+                )
+
         # Persist current UI values so template paths, printer, and options
         # survive across sessions even if the user never ran a batch.
         try:
+            printer = (self.ui.get_printer_name() or "").strip()
+            # Don't persist the placeholder label — it's not a real printer.
+            if printer == DEFAULT_PRINTER_LABEL:
+                printer = ""
             config = AppConfig(
                 day_folder=(self.ui.get_day_folder() or "").strip(),
                 night_folder=(self.ui.get_night_folder() or "").strip(),
-                printer_name=(self.ui.get_printer_name() or "").strip(),
+                printer_name=printer,
                 headers_footers_only=self.ui.get_headers_footers_only(),
             )
             self._save_config(config)
         except Exception as e:
             logger.warning(f"Could not save config on close: {e}")
 
-        if self._processing_thread and self._processing_thread.is_alive():
-            logger.info("Window close requested during processing, cancelling...")
-            self._cancel_event.set()
-            self._processing_thread.join(timeout=5)
         self.root.destroy()
 
     def _show_failure_summary(self, failed_operations: list[FailedOperation]) -> None:

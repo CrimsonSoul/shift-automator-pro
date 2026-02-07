@@ -169,6 +169,7 @@ class ScheduleAppUI:
         self.progress_var: Optional[tk.DoubleVar] = None
         self.progress: Optional[ttk.Progressbar] = None
         self.printer_dropdown: Optional[ttk.OptionMenu] = None
+        self._refresh_btn: Optional[ttk.Button] = None
         self.print_btn: Optional[tk.Button] = None
 
         # Cached enumerations
@@ -639,15 +640,15 @@ class ScheduleAppUI:
         except Exception as e:
             logger.debug(f"Could not style printer dropdown menu: {e}")
 
-        refresh_btn = ttk.Button(
+        self._refresh_btn = ttk.Button(
             printer_row,
             text="Refresh",
             width=10,
             command=self.refresh_printers,
             cursor="hand2",
         )
-        refresh_btn.pack(side="right")
-        _ToolTip(refresh_btn, "Re-scan for available printers")
+        self._refresh_btn.pack(side="right")
+        _ToolTip(self._refresh_btn, "Re-scan for available printers")
 
         if not all_printers:
             msg = "No printers found. Check connections."
@@ -841,8 +842,8 @@ class ScheduleAppUI:
         """
         if self.print_btn:
             self.print_btn.config(command=command)
-        # Allow Enter key to trigger execution from anywhere in the window.
-        self.root.bind("<Return>", lambda _event: command())
+            # Allow Enter key to trigger execution only when the button has focus.
+            self.print_btn.bind("<Return>", lambda _event: command())
         if cancel_command is not None:
             self.root.bind("<Escape>", lambda _event: cancel_command())
 
@@ -870,6 +871,11 @@ class ScheduleAppUI:
                 self.printer_dropdown.config(state=state)
             except Exception as e:
                 logger.debug(f"Could not set printer dropdown state: {e}")
+        if self._refresh_btn is not None:
+            try:
+                self._refresh_btn.config(state=state)
+            except Exception as e:
+                logger.debug(f"Could not set refresh button state: {e}")
         if self._hf_check is not None:
             try:
                 self._hf_check.config(state=state)

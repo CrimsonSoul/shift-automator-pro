@@ -40,6 +40,7 @@ from .constants import (
 )
 from .logger import get_logger
 from .path_validation import validate_folder_path, is_path_within_base
+from .scheduler import get_english_day_name, get_english_month_name
 
 
 logger = get_logger(__name__)
@@ -492,74 +493,54 @@ class WordProcessor:
         # Normalize non-breaking spaces before running patterns
         self._normalize_spaces_in_doc(doc, allowed_story_types=allowed_story_types)
 
-        # Format date components
-        new_day = current_date.strftime("%A")
-        new_month = current_date.strftime("%B")
-        new_day_num = str(int(current_date.strftime("%d")))
-        new_year = current_date.strftime("%Y")
+        # Format date components using locale-independent English names.
+        # strftime("%A") / strftime("%B") return locale-dependent strings
+        # which would break both template lookup and date replacement on
+        # non-English Windows systems.
+        new_day = get_english_day_name(current_date)
+        new_month = get_english_month_name(current_date)
+        new_day_num = str(current_date.day)
+        new_year = str(current_date.year)
 
-        # Patterns to replace (using Word wildcard syntax)
-        # [A-Za-z]@ means "one or more letters"
+        # Patterns to replace (using Word wildcard syntax).
+        # [A-Za-z]@ means "one or more letters", [0-9]{1,2} means 1-2 digits.
         #
-        # IMPORTANT: These pattern groups are ordered from most specific to
-        # least specific.  Within each group, once a pattern matches we skip
-        # the remaining patterns in that group to prevent overlapping
-        # replacements (e.g. the "no comma" pattern re-matching text that
-        # was already replaced by the "with comma" pattern, which caused
-        # day-name duplication like "SaturSaturday").
-
-        # --- Group 1: Full date with day name (mutually exclusive) ---
-        # Try comma-separated first, then abbreviated, then no-comma.
-        day_name_patterns = [
+        # IMPORTANT — overlap prevention strategy:
+        # Each pattern is run independently (all patterns are attempted).
+        # To prevent a broader pattern re-matching text that was already
+        # replaced by a more specific one, patterns are ordered from most
+        # specific to least specific.  The "with comma" pattern is run
+        # FIRST; because it replaces the full "Day, Month DD, YYYY" string
+        # atomically, subsequent patterns cannot partially re-match it.
+        # The night-shift "no comma" pattern uses [A-Za-z]{3,} (3+ letters)
+        # for each word to reduce false positives on non-date text.
+        # The fallback (month-only) pattern requires [A-Za-z]{3,} (3+ letters,
+        # since the shortest English month "May" is 3 chars) to avoid
+        # matching non-date text like "A 1, 2026" or "V 2, 2025".
+        patterns = [
             # Day Shift Style (With Comma): "Sunday, January 04, 2026"
             (
-                "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
-                f"{new_day}, {new_month} {new_day_num}, {new_year}",
-            ),
-            # Day Shift Style Abbreviated: "Sun, January 04, 2026"
-            (
-                "[A-Za-z]{3}, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,}, [A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
                 f"{new_day}, {new_month} {new_day_num}, {new_year}",
             ),
             # Night Shift Style (No Comma): "Saturday January 03, 2026"
             (
-                "[A-Za-z]@ [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,} [A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
                 f"{new_day} {new_month} {new_day_num}, {new_year}",
             ),
-        ]
-
-        # --- Group 2: Date without day name (fallback) ---
-        fallback_patterns = [
             # Fallback/Standard Style: "January 04, 2026"
             (
-                "[A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
                 f"{new_month} {new_day_num}, {new_year}",
             ),
         ]
 
         any_matched = False
-
-        # Run day-name patterns: stop at the first one that matches to
-        # avoid later, broader patterns re-matching already-replaced text.
-        for find_text, replace_text in day_name_patterns:
+        for find_text, replace_text in patterns:
             if self._execute_replace(
                 doc, find_text, replace_text, allowed_story_types=allowed_story_types
             ):
                 any_matched = True
-                break
-
-        # Run fallback patterns only if no day-name pattern matched, since
-        # the fallback pattern is a substring of the day-name patterns and
-        # would corrupt text that was already correctly replaced above.
-        if not any_matched:
-            for find_text, replace_text in fallback_patterns:
-                if self._execute_replace(
-                    doc,
-                    find_text,
-                    replace_text,
-                    allowed_story_types=allowed_story_types,
-                ):
-                    any_matched = True
 
         if not any_matched:
             logger.warning(
@@ -704,16 +685,22 @@ class WordProcessor:
             return False
 
     def __del__(self) -> None:
-        """Safety net: ensure COM resources are released if not explicitly shut down."""
-        if self._initialized or self.word_app is not None:
-            try:
-                self.shutdown()
-            except Exception as e:
-                # Destructor — logging may itself be torn down; best-effort.
-                try:
-                    logger.debug(f"Error in __del__ cleanup: {e}")
-                except Exception:
-                    pass
+        """Safety net: ensure COM resources are released if not explicitly shut down.
+
+        During interpreter shutdown, module globals (``pythoncom``, ``logger``,
+        ``gc``) may already be ``None``.  Every access is guarded so that
+        the destructor never raises.
+        """
+        try:
+            if not (self._initialized or self.word_app is not None):
+                return
+        except Exception:
+            return
+
+        try:
+            self.shutdown()
+        except Exception:
+            pass
 
     def __enter__(self) -> "WordProcessor":
         """Context manager entry: initialize Word and return self.

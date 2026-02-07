@@ -100,8 +100,8 @@ WINDOW_RESIZABLE: Final = True
 # Progress bar
 PROGRESS_MAX: Final = 100
 
-# Date validation
-MAX_DAYS_RANGE: Final = 365
+# Date validation (366 to accommodate full leap-year ranges)
+MAX_DAYS_RANGE: Final = 366
 
 # Batch processing thresholds
 LARGE_BATCH_THRESHOLD: Final = 30  # days — prompt user for confirmation
