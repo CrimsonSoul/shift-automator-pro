@@ -6,7 +6,7 @@ A high-performance desktop application for automating shift schedule printing.
 
 import threading
 import csv
-from datetime import datetime
+from datetime import date, datetime
 from datetime import timedelta
 from typing import Optional, Callable
 
@@ -179,10 +179,15 @@ class ShiftAutomatorApp:
         self,
         day_folder: str,
         night_folder: str,
-        start_date,
-        end_date,
+        start_date: date,
+        end_date: date,
     ) -> tuple[bool, Optional[str]]:
-        """Validate that all required templates exist and resolve unambiguously."""
+        """Validate that all required templates exist and resolve unambiguously.
+
+        On success the WordProcessor instance (with a warm template cache) is
+        stored on ``self._preflight_wp`` so that ``_process_batch`` can reuse it
+        instead of re-scanning the filesystem.
+        """
 
         try:
             total_days = (end_date - start_date).days + 1
@@ -230,6 +235,8 @@ class ShiftAutomatorApp:
                 "Verify your template folders and naming conventions.",
             )
 
+        # Stash the WordProcessor so _process_batch can reuse its template cache.
+        self._preflight_wp: Optional[WordProcessor] = wp
         return True, None
 
     def start_processing(self) -> None:
@@ -290,13 +297,73 @@ class ShiftAutomatorApp:
         )
         self._processing_thread.start()
 
+    def _print_shift(
+        self,
+        word_proc: WordProcessor,
+        folder: str,
+        template: str,
+        current_date: date,
+        printer_name: str,
+        shift_label: str,
+        job_index: int,
+        total_jobs: int,
+        headers_footers_only: bool,
+        failed_operations: list,
+    ) -> None:
+        """Print a single shift document and record failures.
+
+        Args:
+            word_proc: Active WordProcessor instance.
+            folder: Template folder path.
+            template: Template name for the shift.
+            current_date: Date being processed.
+            printer_name: Target printer.
+            shift_label: Human-readable shift label (e.g. "Day" or "Night").
+            job_index: Current 0-based job index (for progress display).
+            total_jobs: Total number of jobs in the batch.
+            headers_footers_only: Whether to limit date replacement to headers/footers.
+            failed_operations: Mutable list to append failure dicts to.
+        """
+        day_name = current_date.strftime("%A")
+        display_date = current_date.strftime("%m/%d/%Y")
+        progress = (job_index / max(total_jobs, 1)) * 100
+        msg = (
+            f"Printing {shift_label} Shift: {day_name} {display_date} "
+            f"({job_index + 1}/{total_jobs})..."
+        )
+
+        def _update(m: str = msg, p: float = progress) -> None:
+            self.ui.update_status(m, p)
+
+        self._safe_after(_update)
+
+        success, error = word_proc.print_document(
+            folder,
+            template,
+            current_date,
+            printer_name,
+            headers_footers_only=headers_footers_only,
+        )
+        if not success:
+            failed_operations.append(
+                {
+                    "date": current_date,
+                    "shift": shift_label.lower(),
+                    "template": template,
+                    "error": error,
+                }
+            )
+            logger.error(
+                f"Failed to print {shift_label.lower()} shift for {current_date}: {error}"
+            )
+
     def _process_batch(self, params: dict) -> None:
         """
         Process the batch of schedules.
 
         Args:
             params: Pre-collected UI values with keys: start_date, end_date,
-                    day_folder, night_folder, printer_name
+                    day_folder, night_folder, printer_name, headers_footers_only
         """
         start_date = params["start_date"]
         end_date = params["end_date"]
@@ -326,13 +393,18 @@ class ShiftAutomatorApp:
         logger.info(f"Processing {total_days} days from {start_date} to {end_date}")
 
         # Track failed operations
-        failed_operations = []
+        failed_operations: list[dict] = []
 
         try:
-            with WordProcessor() as word_proc:
+            # Reuse the WordProcessor from preflight (warm template cache) if available.
+            wp = getattr(self, "_preflight_wp", None) or WordProcessor()
+            self._preflight_wp = None  # release reference
+
+            self._safe_after(lambda: self.ui.update_status("Initializing Word...", 0))
+
+            with wp as word_proc:
                 job_index = 0
                 for i in range(total_days):
-                    # Check for cancellation
                     if self._cancel_event.is_set():
                         logger.info("Batch processing cancelled by user")
                         self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
@@ -340,107 +412,43 @@ class ShiftAutomatorApp:
 
                     current_date = start_date + timedelta(days=i)
 
-                    day_name = current_date.strftime("%A")
-                    display_date = current_date.strftime("%m/%d/%Y")
-
-                    # Update progress (per document)
-                    progress = (job_index / max(total_jobs, 1)) * 100
-                    prep_msg = f"Preparing {day_name} {display_date}..."
-                    prep_progress = progress
-
-                    def _update_preparing(
-                        msg: str = prep_msg,
-                        prog: float = prep_progress,
-                    ) -> None:
-                        self.ui.update_status(msg, prog)
-
-                    self._safe_after(_update_preparing)
-
-                    # Process Day Shift
+                    # Day Shift
                     day_template = get_shift_template_name(current_date, "day")
-                    progress = (job_index / max(total_jobs, 1)) * 100
-                    day_msg = (
-                        f"Printing Day Shift: {day_name} {display_date} "
-                        f"({job_index + 1}/{total_jobs})..."
-                    )
-                    day_progress = progress
-
-                    def _update_day(
-                        msg: str = day_msg,
-                        prog: float = day_progress,
-                    ) -> None:
-                        self.ui.update_status(msg, prog)
-
-                    self._safe_after(_update_day)
-
                     if self._cancel_event.is_set():
-                        logger.info("Batch processing cancelled by user")
                         self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
                         return
-
-                    success, error = word_proc.print_document(
+                    self._print_shift(
+                        word_proc,
                         day_folder,
                         day_template,
                         current_date,
                         printer_name,
-                        headers_footers_only=headers_footers_only,
+                        "Day",
+                        job_index,
+                        total_jobs,
+                        headers_footers_only,
+                        failed_operations,
                     )
                     job_index += 1
-                    if not success:
-                        failed_operations.append(
-                            {
-                                "date": current_date,
-                                "shift": "day",
-                                "template": day_template,
-                                "error": error,
-                            }
-                        )
-                        logger.error(
-                            f"Failed to print day shift for {current_date}: {error}"
-                        )
 
-                    # Process Night Shift
+                    # Night Shift
                     night_template = get_shift_template_name(current_date, "night")
-                    progress = (job_index / max(total_jobs, 1)) * 100
-                    night_msg = (
-                        f"Printing Night Shift: {day_name} {display_date} "
-                        f"({job_index + 1}/{total_jobs})..."
-                    )
-                    night_progress = progress
-
-                    def _update_night(
-                        msg: str = night_msg,
-                        prog: float = night_progress,
-                    ) -> None:
-                        self.ui.update_status(msg, prog)
-
-                    self._safe_after(_update_night)
-
                     if self._cancel_event.is_set():
-                        logger.info("Batch processing cancelled by user")
                         self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
                         return
-
-                    success, error = word_proc.print_document(
+                    self._print_shift(
+                        word_proc,
                         night_folder,
                         night_template,
                         current_date,
                         printer_name,
-                        headers_footers_only=headers_footers_only,
+                        "Night",
+                        job_index,
+                        total_jobs,
+                        headers_footers_only,
+                        failed_operations,
                     )
                     job_index += 1
-                    if not success:
-                        failed_operations.append(
-                            {
-                                "date": current_date,
-                                "shift": "night",
-                                "template": night_template,
-                                "error": error,
-                            }
-                        )
-                        logger.error(
-                            f"Failed to print night shift for {current_date}: {error}"
-                        )
 
                 # Complete
                 self._safe_after(
@@ -469,7 +477,7 @@ class ShiftAutomatorApp:
             )
         finally:
             # Re-enable button and reset text
-            def reset_ui():
+            def reset_ui() -> None:
                 if self._closing:
                     return
                 if self.ui.print_btn:

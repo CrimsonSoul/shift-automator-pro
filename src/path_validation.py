@@ -7,7 +7,7 @@ security issues like path traversal attacks.
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 from .logger import get_logger
 
@@ -21,7 +21,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-def validate_folder_path(path: str) -> Tuple[bool, Optional[str]]:
+def validate_folder_path(path: str) -> tuple[bool, Optional[str]]:
     """
     Validate that a folder path is safe and accessible.
 
@@ -64,7 +64,7 @@ def validate_folder_path(path: str) -> Tuple[bool, Optional[str]]:
 
 def validate_file_path(
     path: str, allowed_extensions: Optional[list[str]] = None
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str]]:
     """
     Validate that a file path is safe and has an allowed extension.
 
@@ -128,6 +128,10 @@ def sanitize_filename(filename: str) -> str:
 
     # Remove leading/trailing dots and spaces
     sanitized = sanitized.strip(". ")
+
+    # Guard against empty result (e.g. input was all dots/spaces)
+    if not sanitized:
+        sanitized = "_unnamed"
 
     # Limit length
     if len(sanitized) > 255:

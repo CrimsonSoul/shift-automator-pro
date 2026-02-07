@@ -96,13 +96,22 @@ class ConfigManager:
                             f"Configuration loaded from legacy path {self._legacy_config_path}; "
                             f"migrating to {self.config_path}"
                         )
-                        try:
-                            self.save(self._config)
-                        except Exception as e:
-                            logger.warning(
-                                f"Could not migrate legacy config to {self.config_path}: {e}"
-                            )
-                        return self._config
+                    try:
+                        self.save(self._config)
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not migrate legacy config to {self.config_path}: {e}"
+                        )
+                    # Rename old file so it doesn't get picked up on the next launch.
+                    try:
+                        migrated = self._legacy_config_path.with_suffix(
+                            ".json.migrated"
+                        )
+                        self._legacy_config_path.rename(migrated)
+                        logger.info(f"Legacy config renamed to {migrated}")
+                    except Exception as e:
+                        logger.debug(f"Could not rename legacy config: {e}")
+                    return self._config
                 except Exception as e:
                     logger.warning(
                         f"Could not load legacy config at {self._legacy_config_path}: {e}"

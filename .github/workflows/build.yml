@@ -61,7 +61,7 @@ jobs:
 
       - name: Create Release
         if: github.event.inputs.release == 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: Shift Automator Pro v${{ github.event.inputs.version }}
@@ -69,11 +69,11 @@ jobs:
             ## Shift Automator Pro v${{ github.event.inputs.version }}
             
             ### Changes
-            - Refactored monolithic codebase into modular structure
-            - Added comprehensive error handling and logging
-            - Implemented input validation and path security
-            - Added complete type hints and docstrings
-            - Created comprehensive test suite (83 unit tests)
+            - Production-hardened modular architecture
+            - Preflight template validation and failure CSV reports
+            - Comprehensive error handling, logging, and input validation
+            - Full type hints, docstrings, and per-user AppData configuration
+            - 105+ unit tests with cross-platform CI
             
             ### Installation
 

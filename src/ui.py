@@ -56,6 +56,12 @@ class ScheduleAppUI:
         self.root.resizable(WINDOW_RESIZABLE, WINDOW_RESIZABLE)
         self.root.configure(bg=COLORS.background)
 
+        # Provide a sane minimum size; DPI scaling can otherwise clip content.
+        try:
+            self.root.minsize(WINDOW_WIDTH, 720)
+        except Exception:
+            pass
+
         # Configure styles
         self.style = ttk.Style()
         self.style.theme_use("clam")
@@ -79,6 +85,9 @@ class ScheduleAppUI:
 
         # Create widgets
         self._create_widgets()
+
+        # If DPI scaling / fonts push content beyond default height, expand once.
+        self._auto_resize_to_content()
 
         logger.info("UI initialized")
 
@@ -206,7 +215,7 @@ class ScheduleAppUI:
     def _create_widgets(self) -> None:
         """Create all UI widgets."""
         # Background Canvas
-        bg_canvas = ttk.Frame(self.root, padding="40")
+        bg_canvas = ttk.Frame(self.root, padding="28")
         bg_canvas.pack(fill="both", expand=True)
 
         # Header Section
@@ -265,6 +274,24 @@ class ScheduleAppUI:
 
         date_entry_cls = cast(Any, DateEntry)
 
+        calendar_kw = {
+            "background": COLORS.surface,
+            "foreground": COLORS.text_main,
+            "bordercolor": COLORS.border,
+            "headersbackground": COLORS.background,
+            "headersforeground": COLORS.text_dim,
+            "selectbackground": COLORS.accent,
+            "selectforeground": "#FFFFFF",
+            "normalbackground": COLORS.surface,
+            "normalforeground": COLORS.text_main,
+            "weekendbackground": COLORS.surface,
+            "weekendforeground": COLORS.text_dim,
+            "othermonthbackground": COLORS.background,
+            "othermonthforeground": COLORS.text_dim,
+            "othermonthwebackground": COLORS.background,
+            "othermonthweforeground": COLORS.text_dim,
+        }
+
         range_row = ttk.Frame(parent)
         range_row.pack(fill="x", pady=(0, 20))
 
@@ -274,8 +301,10 @@ class ScheduleAppUI:
         ttk.Label(start_wrap, text="START DATE", style="Sub.TLabel").pack(
             anchor="w", pady=(0, 8)
         )
-        start_picker = date_entry_cls(
-            start_wrap, background=COLORS.accent, foreground="white", borderwidth=0
+        start_picker = self._create_date_entry(
+            date_entry_cls,
+            start_wrap,
+            calendar_kw=calendar_kw,
         )
         start_picker.pack(fill="x")
         self.start_date_picker = start_picker
@@ -291,8 +320,10 @@ class ScheduleAppUI:
         ttk.Label(end_wrap, text="END DATE", style="Sub.TLabel").pack(
             anchor="w", pady=(0, 8)
         )
-        end_picker = date_entry_cls(
-            end_wrap, background=COLORS.accent, foreground="white", borderwidth=0
+        end_picker = self._create_date_entry(
+            date_entry_cls,
+            end_wrap,
+            calendar_kw=calendar_kw,
         )
         end_picker.pack(fill="x")
         self.end_date_picker = end_picker
@@ -300,16 +331,71 @@ class ScheduleAppUI:
     def _on_start_date_selected(self, event: Optional[object] = None) -> None:
         """Default end date to start date when needed."""
 
-        if not self.start_date_picker or not self.end_date_picker:
+        start_picker = self.start_date_picker
+        end_picker = self.end_date_picker
+
+        if start_picker is None or end_picker is None:
             return
 
         try:
-            start_dt = self.start_date_picker.get_date()
-            end_dt = self.end_date_picker.get_date()
+            start_dt = cast(Any, start_picker).get_date()
+            end_dt = cast(Any, end_picker).get_date()
             if end_dt < start_dt:
-                self.end_date_picker.set_date(start_dt)
+                cast(Any, end_picker).set_date(start_dt)
         except Exception:
             # DateEntry implementations vary; never block the UI on this helper.
+            return
+
+    def _create_date_entry(
+        self,
+        date_entry_cls: Any,
+        parent: Any,
+        calendar_kw: dict[str, Any],
+    ) -> Any:
+        """Create a themed tkcalendar DateEntry.
+
+        tkcalendar versions differ in supported keyword args; fall back gracefully.
+        """
+
+        # Prefer using ttk styling for the entry itself.
+        try:
+            return date_entry_cls(
+                parent,
+                style="TEntry",
+                date_pattern="mm/dd/yyyy",
+                calendar_kw=calendar_kw,
+            )
+        except TypeError:
+            pass
+
+        # Older builds may not support calendar_kw; try passing common color keys directly.
+        try:
+            return date_entry_cls(
+                parent,
+                style="TEntry",
+                date_pattern="mm/dd/yyyy",
+                **calendar_kw,
+            )
+        except TypeError:
+            return date_entry_cls(parent)
+
+    def _auto_resize_to_content(self) -> None:
+        """Expand the window once if content would be clipped."""
+
+        try:
+            self.root.update_idletasks()
+            req_w = self.root.winfo_reqwidth()
+            req_h = self.root.winfo_reqheight()
+            cur_w = self.root.winfo_width()
+            cur_h = self.root.winfo_height()
+            scr_w = self.root.winfo_screenwidth()
+            scr_h = self.root.winfo_screenheight()
+
+            target_w = min(max(cur_w, req_w), max(320, scr_w - 80))
+            target_h = min(max(cur_h, req_h), max(400, scr_h - 80))
+            if target_w != cur_w or target_h != cur_h:
+                self.root.geometry(f"{target_w}x{target_h}")
+        except Exception:
             return
 
     def _create_printer_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
@@ -363,6 +449,11 @@ class ScheduleAppUI:
             text="Replace dates in headers/footers only (safer)",
             variable=self.headers_only_var,
         ).pack(anchor="w")
+        ttk.Label(
+            options_row,
+            text="When enabled, date patterns inside the document body are left unchanged.",
+            style="Sub.TLabel",
+        ).pack(anchor="w", padx=(20, 0))
 
     def _create_footer(self, parent: ttk.Frame) -> None:
         """Create the action footer."""
@@ -373,7 +464,9 @@ class ScheduleAppUI:
         status_wrap = ttk.Frame(footer)
         status_wrap.pack(fill="x", pady=(0, 12))
         self.status_label = ttk.Label(
-            status_wrap, text="System Ready", style="Sub.TLabel"
+            status_wrap,
+            text="Select folders, dates, and printer to begin",
+            style="Sub.TLabel",
         )
         self.status_label.pack(side="left")
 
@@ -470,22 +563,36 @@ class ScheduleAppUI:
         return bool(self.headers_only_var.get()) if self.headers_only_var else False
 
     def get_start_date(self) -> Optional[date]:
-        """Get the start date."""
-        return self.start_date_picker.get_date() if self.start_date_picker else None
+        """Get the start date, or None if unavailable or invalid."""
+        if not self.start_date_picker:
+            return None
+        try:
+            return self.start_date_picker.get_date()
+        except (ValueError, AttributeError):
+            logger.warning("Could not parse start date from picker")
+            return None
 
     def get_end_date(self) -> Optional[date]:
-        """Get the end date."""
-        return self.end_date_picker.get_date() if self.end_date_picker else None
+        """Get the end date, or None if unavailable or invalid."""
+        if not self.end_date_picker:
+            return None
+        try:
+            return self.end_date_picker.get_date()
+        except (ValueError, AttributeError):
+            logger.warning("Could not parse end date from picker")
+            return None
 
     def set_start_command(self, command: Callable[[], None]) -> None:
         """
-        Set the command for the print button.
+        Set the command for the print button and bind Enter key.
 
         Args:
             command: Function to call when button is clicked
         """
         if self.print_btn:
             self.print_btn.config(command=command)
+        # Allow Enter key to trigger execution from anywhere in the window.
+        self.root.bind("<Return>", lambda _event: command())
 
     def set_print_button_state(self, state: Literal["normal", "disabled"]) -> None:
         """

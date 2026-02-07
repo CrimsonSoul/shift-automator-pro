@@ -17,6 +17,6 @@ python main.py
 REM If application crashed, pause to see error
 if errorlevel 1 (
     echo.
-    echo Application exited with an error. Check shift_automator.log for details.
+    echo Application exited with an error. Check %%APPDATA%%\Shift Automator Pro\shift_automator.log for details.
     pause
 )

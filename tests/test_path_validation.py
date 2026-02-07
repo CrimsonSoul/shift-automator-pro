@@ -175,14 +175,14 @@ class TestSanitizeFilename:
         assert len(result) == 255
 
     def test_empty_filename(self):
-        """Empty filename should return empty string."""
+        """Empty filename should return a safe fallback."""
         result = sanitize_filename("")
-        assert result == ""
+        assert result == "_unnamed"
 
     def test_only_dots(self):
-        """Filename with only dots should return empty string."""
+        """Filename with only dots should return a safe fallback."""
         result = sanitize_filename("...")
-        assert result == ""
+        assert result == "_unnamed"
 
 
 class TestIsPathWithinBase:

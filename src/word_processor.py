@@ -10,7 +10,7 @@ import time
 import re
 from datetime import date
 from pathlib import Path
-from typing import Optional, Any, Tuple, Callable
+from typing import Optional, Any, Callable
 from typing import cast
 
 try:
@@ -166,11 +166,17 @@ class WordProcessor:
             logger.debug("Cleared all template caches")
 
     def _build_template_cache(self, folder_path: str) -> dict[str, str]:
-        """Build a normalized template cache for a folder."""
+        """Build a normalized template cache for a folder.
+
+        Filters out Word lock files (~$*) and hidden files (.*).
+        """
 
         files = os.listdir(folder_path)
         cache: dict[str, str] = {}
         for f in files:
+            # Skip Word temp lock files and hidden files
+            if f.startswith("~$") or f.startswith("."):
+                continue
             if f.lower().endswith(DOCX_EXTENSION):
                 base_name = " ".join(f.lower().replace(DOCX_EXTENSION, "").split())
                 cache[base_name] = os.path.join(folder_path, f)
@@ -346,7 +352,7 @@ class WordProcessor:
         current_date: date,
         printer_name: str,
         headers_footers_only: bool = False,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, Optional[str]]:
         """
         Open, update dates, and print a Word document.
 
@@ -355,9 +361,10 @@ class WordProcessor:
             template_name: The name of the template file
             current_date: The date to use for replacements
             printer_name: The printer to use
+            headers_footers_only: If True, only replace dates in headers/footers
 
         Returns:
-            Tuple of (success, error_message)
+            tuple of (success, error_message)
         """
         if not self._initialized or not self.word_app:
             return False, "Word processor not initialized"

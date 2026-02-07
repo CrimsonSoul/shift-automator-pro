@@ -76,28 +76,35 @@ Tip:
 ## 📁 Project Structure
 
 ```
-schedule_app/
+shift-automator-pro/
 ├── src/
-│   ├── __init__.py          # Package initialization
-│   ├── constants.py          # Application constants and styling
+│   ├── __init__.py           # Package initialization
+│   ├── app_paths.py          # Per-user data directory helpers
 │   ├── config.py             # Configuration management
+│   ├── constants.py          # Application constants and styling
 │   ├── logger.py             # Logging setup
+│   ├── main.py               # Main application controller
 │   ├── path_validation.py    # Path validation and security
 │   ├── scheduler.py          # Date and scheduling logic
 │   ├── ui.py                 # UI components
-│   ├── word_processor.py     # Word document processing
-│   └── main.py              # Main application controller
+│   └── word_processor.py     # Word document processing
 ├── tests/
-│   ├── conftest.py             # Mock Windows modules for cross-platform testing
-│   ├── test_config.py          # Configuration tests
+│   ├── conftest.py           # Mock Windows modules for cross-platform testing
+│   ├── test_config.py        # Configuration tests
+│   ├── test_main.py          # Main controller tests
 │   ├── test_path_validation.py # Path validation tests
-│   ├── test_scheduler.py       # Scheduler tests
-│   ├── test_ui.py              # UI component tests
-│   └── test_word_processor.py  # Word processor tests
-├── main.py                  # Application entry point
+│   ├── test_scheduler.py     # Scheduler tests
+│   ├── test_ui.py            # UI component tests
+│   └── test_word_processor.py # Word processor tests
+├── .github/workflows/
+│   ├── build.yml             # On-demand Windows build & release
+│   └── ci.yml                # Continuous integration (lint, type-check, test)
+├── main.py                   # Application entry point
+├── start_app.bat             # Windows launcher
+├── setup.bat                 # Windows dependency installer
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Development dependencies
-├── pytest.ini              # Pytest configuration
+├── pytest.ini                # Pytest configuration
 └── README.md
 ```
 

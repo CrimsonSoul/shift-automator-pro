@@ -56,10 +56,12 @@ SATURDAY: Final = 5
 SUNDAY: Final = 6
 
 # Word document protection types (Word API wdProtectionType)
+# https://learn.microsoft.com/en-us/office/vba/api/word.wdprotectiontype
 PROTECTION_NONE: Final = -1  # wdNoProtection
-PROTECTION_READ_ONLY: Final = 0  # wdAllowOnlyReading
+PROTECTION_ALLOW_REVISIONS: Final = 0  # wdAllowOnlyRevisions
 PROTECTION_ALLOW_COMMENTS: Final = 1  # wdAllowOnlyComments
-PROTECTION_ALLOW_REVISIONS: Final = 2  # wdAllowOnlyRevisions
+PROTECTION_ALLOW_FORM_FIELDS: Final = 2  # wdAllowOnlyFormFields
+PROTECTION_READ_ONLY: Final = 3  # wdAllowOnlyReading
 
 # Word document close options (Word API wdSaveOptions)
 CLOSE_NO_SAVE: Final = 0  # wdDoNotSaveChanges
@@ -82,8 +84,8 @@ LOG_FILENAME: Final = "shift_automator.log"
 
 # UI Constants
 WINDOW_WIDTH: Final = 640
-WINDOW_HEIGHT: Final = 720
-WINDOW_RESIZABLE: Final = False
+WINDOW_HEIGHT: Final = 820
+WINDOW_RESIZABLE: Final = True
 
 # Progress bar
 PROGRESS_MAX: Final = 100
