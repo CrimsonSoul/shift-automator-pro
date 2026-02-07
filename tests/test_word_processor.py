@@ -92,10 +92,11 @@ class TestWordProcessor:
         ) as mock_exec:
             wp.replace_dates(mock_doc, current_date)
 
-            # Should be called 4 times (for 4 patterns)
-            assert mock_exec.call_count == 4
+            # Should be called once: the first day-name pattern matches and
+            # we stop to avoid overlapping patterns re-matching replaced text.
+            assert mock_exec.call_count == 1
 
-            # Verify one of the calls
+            # Verify the call used the most specific "with comma" pattern
             # Pattern: "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}"
             # Replacement: "Thursday, January 15, 2026"
             calls = [c[0][2] for c in mock_exec.call_args_list]

@@ -500,7 +500,17 @@ class WordProcessor:
 
         # Patterns to replace (using Word wildcard syntax)
         # [A-Za-z]@ means "one or more letters"
-        patterns = [
+        #
+        # IMPORTANT: These pattern groups are ordered from most specific to
+        # least specific.  Within each group, once a pattern matches we skip
+        # the remaining patterns in that group to prevent overlapping
+        # replacements (e.g. the "no comma" pattern re-matching text that
+        # was already replaced by the "with comma" pattern, which caused
+        # day-name duplication like "SaturSaturday").
+
+        # --- Group 1: Full date with day name (mutually exclusive) ---
+        # Try comma-separated first, then abbreviated, then no-comma.
+        day_name_patterns = [
             # Day Shift Style (With Comma): "Sunday, January 04, 2026"
             (
                 "[A-Za-z]@, [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
@@ -516,6 +526,10 @@ class WordProcessor:
                 "[A-Za-z]@ [A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
                 f"{new_day} {new_month} {new_day_num}, {new_year}",
             ),
+        ]
+
+        # --- Group 2: Date without day name (fallback) ---
+        fallback_patterns = [
             # Fallback/Standard Style: "January 04, 2026"
             (
                 "[A-Za-z]@ [0-9]{1,2}, [0-9]{4}",
@@ -524,11 +538,28 @@ class WordProcessor:
         ]
 
         any_matched = False
-        for find_text, replace_text in patterns:
+
+        # Run day-name patterns: stop at the first one that matches to
+        # avoid later, broader patterns re-matching already-replaced text.
+        for find_text, replace_text in day_name_patterns:
             if self._execute_replace(
                 doc, find_text, replace_text, allowed_story_types=allowed_story_types
             ):
                 any_matched = True
+                break
+
+        # Run fallback patterns only if no day-name pattern matched, since
+        # the fallback pattern is a substring of the day-name patterns and
+        # would corrupt text that was already correctly replaced above.
+        if not any_matched:
+            for find_text, replace_text in fallback_patterns:
+                if self._execute_replace(
+                    doc,
+                    find_text,
+                    replace_text,
+                    allowed_story_types=allowed_story_types,
+                ):
+                    any_matched = True
 
         if not any_matched:
             logger.warning(
