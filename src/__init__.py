@@ -18,8 +18,18 @@ __author__ = "Shift Automator Team"
 __all__ = ["ShiftAutomatorApp", "main"]
 
 
-def __getattr__(name: str):
-    """Lazy-import heavy symbols to avoid eagerly loading the entire app stack."""
+def __getattr__(name: str) -> object:
+    """Lazy-import heavy symbols to avoid eagerly loading the entire app stack.
+
+    Args:
+        name: The attribute name being looked up.
+
+    Returns:
+        The requested module-level symbol (``ShiftAutomatorApp`` or ``main``).
+
+    Raises:
+        AttributeError: If *name* is not a public symbol of this package.
+    """
 
     if name in ("ShiftAutomatorApp", "main"):
         from .main import ShiftAutomatorApp, main  # noqa: F811

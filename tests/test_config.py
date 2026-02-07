@@ -3,9 +3,6 @@ Unit tests for config module.
 """
 
 import json
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -75,49 +72,6 @@ class TestAppConfig:
         assert config.printer_name == ""
         assert config.headers_footers_only is False
 
-    def test_validate_with_valid_folders(self, tmp_path):
-        """Validation should pass with valid folders."""
-        day_folder = tmp_path / "day"
-        night_folder = tmp_path / "night"
-        day_folder.mkdir()
-        night_folder.mkdir()
-
-        config = AppConfig(
-            day_folder=str(day_folder),
-            night_folder=str(night_folder),
-            printer_name="My Printer",
-        )
-        is_valid, error = config.validate()
-        assert is_valid is True
-        assert error is None
-
-    def test_validate_with_invalid_day_folder(self):
-        """Validation should fail with non-existent day folder."""
-        config = AppConfig(
-            day_folder="/nonexistent/path", night_folder="", printer_name="My Printer"
-        )
-        is_valid, error = config.validate()
-        assert is_valid is False
-        assert error is not None
-        assert "does not exist" in error
-
-    def test_validate_with_invalid_night_folder(self):
-        """Validation should fail with non-existent night folder."""
-        config = AppConfig(
-            day_folder="", night_folder="/nonexistent/path", printer_name="My Printer"
-        )
-        is_valid, error = config.validate()
-        assert is_valid is False
-        assert error is not None
-        assert "does not exist" in error
-
-    def test_validate_with_empty_folders(self):
-        """Validation should pass with empty folders."""
-        config = AppConfig(day_folder="", night_folder="", printer_name="My Printer")
-        is_valid, error = config.validate()
-        assert is_valid is True
-        assert error is None
-
 
 class TestConfigManager:
     """Tests for ConfigManager class."""
@@ -185,3 +139,65 @@ class TestConfigManager:
 
         assert manager.config.day_folder == "/new/path"
         assert manager.config is new_config
+
+    def test_from_dict_ignores_unknown_keys(self):
+        """from_dict should silently ignore extra keys."""
+        data = {"day_folder": "/x", "unknown_key": 42, "extra": "ignored"}
+        config = AppConfig.from_dict(data)
+        assert config.day_folder == "/x"
+        assert not hasattr(config, "unknown_key")
+
+    def test_save_none_config_logs_warning(self, tmp_path):
+        """save(None) when no config cached should log warning and return."""
+        config_file = tmp_path / "config.json"
+        manager = ConfigManager(str(config_file))
+        # _config is None, and we pass None explicitly
+        manager.save(None)
+        assert not config_file.exists()
+
+    def test_save_creates_parent_directory(self, tmp_path):
+        """save() should create parent directories if needed."""
+        config_file = tmp_path / "sub" / "dir" / "config.json"
+        manager = ConfigManager(str(config_file))
+        manager.save(AppConfig(day_folder="/test"))
+        assert config_file.exists()
+
+    def test_atomic_write_no_leftover_tmp(self, tmp_path):
+        """save() should not leave a .tmp file on success."""
+        config_file = tmp_path / "config.json"
+        manager = ConfigManager(str(config_file))
+        manager.save(AppConfig(day_folder="/test"))
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert tmp_files == []
+
+    def test_legacy_migration(self, tmp_path):
+        """Should migrate legacy config.json from working dir to new path."""
+        # Create a legacy config in the working directory
+        import os
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            legacy_file = tmp_path / "config.json"
+            legacy_file.write_text(
+                json.dumps({"day_folder": "/legacy/day", "printer_name": "OldPrinter"})
+            )
+
+            new_path = tmp_path / "appdata" / "config.json"
+            manager = ConfigManager()
+            # Override paths to use our tmp locations
+            manager.config_path = new_path
+            manager._legacy_config_path = legacy_file
+            manager._allow_legacy_migration = True
+
+            config = manager.load()
+            assert config.day_folder == "/legacy/day"
+            assert config.printer_name == "OldPrinter"
+            # New file should be created
+            assert new_path.exists()
+            # Legacy file should be renamed
+            assert not legacy_file.exists()
+            migrated = legacy_file.with_suffix(".json.migrated")
+            assert migrated.exists()
+        finally:
+            os.chdir(old_cwd)

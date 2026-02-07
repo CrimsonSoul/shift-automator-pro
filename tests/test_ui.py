@@ -80,10 +80,25 @@ class TestScheduleAppUI:
         ui.print_btn.config.assert_called_with(state="disabled")
 
     def test_update_status(self, ui):
-        """Should update status label and progress bar."""
+        """Should update status label and progress bar with contextual style."""
         ui.update_status("Processing...", 50.0)
-        ui.status_label.config.assert_called_with(text="Processing...")
+        ui.status_label.config.assert_called_with(
+            text="Processing...", style="Sub.TLabel"
+        )
         ui.progress_var.set.assert_called_with(50.0)
+
+    def test_update_status_complete_style(self, ui):
+        """Should apply success style when message contains 'complete'."""
+        ui.update_status("Print complete", 100.0)
+        ui.status_label.config.assert_called_with(
+            text="Print complete", style="Success.TLabel"
+        )
+
+    def test_update_status_error_style(self, ui):
+        """Should apply error style when message contains error keywords."""
+        for msg in ("Cancelled by user", "Error occurred", "Print failed"):
+            ui.update_status(msg, 0.0)
+            ui.status_label.config.assert_called_with(text=msg, style="Error.TLabel")
 
     @patch("tkinter.messagebox.showerror")
     def test_show_error(self, mock_error, ui):
@@ -92,10 +107,20 @@ class TestScheduleAppUI:
         mock_error.assert_called_with("Title", "Message")
 
     def test_set_start_command(self, ui):
-        """Should set the button command."""
+        """Should set the button command and bind Enter key."""
         mock_cmd = MagicMock()
         ui.set_start_command(mock_cmd)
         ui.print_btn.config.assert_called_with(command=mock_cmd)
+
+    def test_set_start_command_with_cancel(self, ui):
+        """Should bind Escape key when cancel_command is provided."""
+        mock_cmd = MagicMock()
+        mock_cancel = MagicMock()
+        ui.set_start_command(mock_cmd, cancel_command=mock_cancel)
+        ui.print_btn.config.assert_called_with(command=mock_cmd)
+        # Verify Escape was bound (check bind call args for "<Escape>")
+        bound_keys = [call[0][0] for call in ui.root.bind.call_args_list]
+        assert "<Escape>" in bound_keys
 
     def test_get_headers_footers_only(self, ui):
         """Should return boolean from headers-only var."""

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from .constants import MAX_FILENAME_LENGTH
 from .logger import get_logger
 
 __all__ = [
@@ -68,6 +69,8 @@ def validate_file_path(
     """
     Validate that a file path is safe and has an allowed extension.
 
+    Part of the public API for external consumers and future use.
+
     Args:
         path: The file path to validate
         allowed_extensions: List of allowed file extensions (e.g., [".docx"])
@@ -114,6 +117,8 @@ def sanitize_filename(filename: str) -> str:
     """
     Sanitize a filename by removing potentially dangerous characters.
 
+    Part of the public API for external consumers and future use.
+
     Args:
         filename: The filename to sanitize
 
@@ -134,8 +139,8 @@ def sanitize_filename(filename: str) -> str:
         sanitized = "_unnamed"
 
     # Limit length
-    if len(sanitized) > 255:
-        sanitized = sanitized[:255]
+    if len(sanitized) > MAX_FILENAME_LENGTH:
+        sanitized = sanitized[:MAX_FILENAME_LENGTH]
 
     logger.debug(f"Sanitized filename: '{filename}' -> '{sanitized}'")
     return sanitized

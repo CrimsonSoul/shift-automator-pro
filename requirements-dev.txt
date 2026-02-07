@@ -1,6 +1,9 @@
 # Development dependencies for Shift Automator
 # These are required for development, testing, and building
 
+# Include runtime dependencies
+-r requirements.txt
+
 # Build tools
 pyinstaller>=6.10.0
 

@@ -26,7 +26,7 @@ def setup_logging(
 
     Args:
         log_level: The logging level (default: check DEBUG env or logging.INFO)
-        log_dir: Directory for log files (default: current working directory)
+        log_dir: Directory for log files (default: per-user data directory)
         log_filename: Name of the log file
 
     Returns:

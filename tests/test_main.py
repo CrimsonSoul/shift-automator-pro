@@ -2,16 +2,16 @@
 Integration tests for main application module.
 """
 
+import csv
 import sys
-import threading
 from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Import the class directly, then grab the actual module from sys.modules
-# (src.main as a name is shadowed by the main() function exported in src/__init__.py)
-from src.main import ShiftAutomatorApp
+# (src.main as a name is shadowed by the main() function exported in src.__init__.py)
+from src.main import ShiftAutomatorApp, _compute_batch_size
 
 main_module = sys.modules["src.main"]
 
@@ -150,10 +150,73 @@ class TestShiftAutomatorApp:
         # Should not have printed anything (cancelled immediately)
         assert mock_wp.print_document.call_count == 0
 
+    def test_on_close_without_active_thread(self, app):
+        """Should destroy window immediately if no thread is running."""
+        app._processing_thread = None
+        app._on_close()
+        app.root.destroy.assert_called_once()
+
+    def test_on_close_with_active_thread(self, app):
+        """Should cancel and join thread before destroying window."""
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        app._processing_thread = mock_thread
+
+        app._on_close()
+
+        assert app._cancel_event.is_set()
+        mock_thread.join.assert_called_once_with(timeout=5)
+        app.root.destroy.assert_called_once()
+
+    def test_cancel_if_running_sets_event(self, app):
+        """_cancel_if_running should set cancel event when thread is alive."""
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        app._processing_thread = mock_thread
+
+        app._cancel_if_running()
+
+        assert app._cancel_event.is_set()
+        app.ui.set_print_button_state.assert_called_with("disabled")
+
+    def test_cancel_if_running_noop_when_idle(self, app):
+        """_cancel_if_running should do nothing when no thread is running."""
+        app._processing_thread = None
+        app._cancel_if_running()
+        assert not app._cancel_event.is_set()
+
+    def test_safe_after_skips_when_closing(self, app):
+        """_safe_after should not schedule if _closing is True."""
+        app._closing = True
+        callback = MagicMock()
+        app._safe_after(callback)
+        app.root.after.assert_not_called()
+
+    def test_safe_after_schedules_callback(self, app):
+        """_safe_after should call root.after(0, callback)."""
+        callback = MagicMock()
+        app._safe_after(callback)
+        app.root.after.assert_called_with(0, callback)
+
     @patch.object(main_module, "WordProcessor")
     @patch.object(main_module, "validate_folder_path", return_value=(True, None))
-    def test_process_batch_tracks_failures(self, mock_validate, mock_wp_class, app):
-        """Should track failed operations."""
+    def test_start_processing_stop_button(self, mock_validate, mock_wp_class, app):
+        """start_processing should cancel when a thread is already running."""
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        app._processing_thread = mock_thread
+
+        app.start_processing()
+
+        assert app._cancel_event.is_set()
+        app.ui.set_print_button_state.assert_called_with("disabled")
+
+    @patch.object(main_module, "WordProcessor")
+    @patch.object(main_module, "validate_folder_path", return_value=(True, None))
+    def test_process_batch_tracks_failures_with_summary(
+        self, mock_validate, mock_wp_class, app
+    ):
+        """Should call _show_failure_summary with the correct failures."""
         mock_wp = MagicMock()
         # Day shift fails, night shift succeeds
         mock_wp.print_document.side_effect = [
@@ -172,25 +235,280 @@ class TestShiftAutomatorApp:
             "printer_name": "Test Printer",
         }
 
+        with patch.object(app, "_show_failure_summary") as mock_summary:
+            app._process_batch(params)
+
+            # The callback is scheduled via _safe_after — find it and call it
+            # to trigger _show_failure_summary
+            for call in app.root.after.call_args_list:
+                callback = call[0][1] if len(call[0]) > 1 else None
+                if callback is not None:
+                    try:
+                        callback()
+                    except Exception:
+                        pass
+
+            mock_summary.assert_called_once()
+            failures = mock_summary.call_args[0][0]
+            assert len(failures) == 1
+            assert failures[0]["shift"] == "day"
+            assert "Template not found" in failures[0]["error"]
+
+    def test_write_failure_report_creates_csv(self, app, tmp_path):
+        """_write_failure_report should create a CSV with correct headers."""
+        with patch("src.main.get_data_dir", return_value=tmp_path):
+            failures = [
+                {
+                    "date": date(2026, 1, 14),
+                    "shift": "day",
+                    "template": "Wednesday",
+                    "error": "Not found",
+                },
+                {
+                    "date": date(2026, 1, 14),
+                    "shift": "night",
+                    "template": "Wednesday Night",
+                    "error": "Printer offline",
+                },
+            ]
+            result = app._write_failure_report(failures)
+
+        assert result is not None
+        # Read back and verify
+        with open(result, "r", newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+            assert headers == ["date", "shift", "template", "error"]
+            rows = list(reader)
+            assert len(rows) == 2
+            assert rows[0][1] == "day"
+            assert rows[1][3] == "Printer offline"
+
+    def test_safe_after_tcl_error_is_swallowed(self, app):
+        """_safe_after should swallow TclError when window is already destroyed."""
+        import tkinter as tk_mod
+
+        app.root.after.side_effect = tk_mod.TclError("application has been destroyed")
+        callback = MagicMock()
+        # Should not raise
+        app._safe_after(callback)
+        app.root.after.assert_called_once_with(0, callback)
+
+    def test_preflight_templates_all_present(self, app, tmp_path):
+        """_preflight_templates should succeed when all templates exist."""
+        day_dir = tmp_path / "day"
+        night_dir = tmp_path / "night"
+        day_dir.mkdir()
+        night_dir.mkdir()
+
+        # Create templates for a single day (Wednesday 2026-01-14)
+        (day_dir / "Wednesday.docx").write_text("dummy")
+        (night_dir / "Wednesday Night.docx").write_text("dummy")
+
+        ok, err = app._preflight_templates(
+            str(day_dir), str(night_dir), date(2026, 1, 14), date(2026, 1, 14)
+        )
+        assert ok is True
+        assert err is None
+        # Should stash the WordProcessor for reuse
+        assert app._preflight_wp is not None
+
+    def test_preflight_templates_missing_template(self, app, tmp_path):
+        """_preflight_templates should fail when a template is missing."""
+        day_dir = tmp_path / "day"
+        night_dir = tmp_path / "night"
+        day_dir.mkdir()
+        night_dir.mkdir()
+
+        # Only create night template, day is missing
+        (night_dir / "Wednesday.docx").write_text("dummy")
+
+        ok, err = app._preflight_templates(
+            str(day_dir), str(night_dir), date(2026, 1, 14), date(2026, 1, 14)
+        )
+        assert ok is False
+        assert "Missing required templates" in err
+
+    def test_preflight_templates_ambiguous_lookup(self, app, tmp_path):
+        """_preflight_templates should fail on TemplateLookupError."""
+        day_dir = tmp_path / "day"
+        night_dir = tmp_path / "night"
+        day_dir.mkdir()
+        night_dir.mkdir()
+
+        (night_dir / "Wednesday.docx").write_text("dummy")
+
+        with patch.object(main_module, "WordProcessor") as MockWP:
+            mock_wp = MockWP.return_value
+            mock_wp.find_template_file.side_effect = main_module.TemplateLookupError(
+                "Ambiguous match"
+            )
+            ok, err = app._preflight_templates(
+                str(day_dir), str(night_dir), date(2026, 1, 14), date(2026, 1, 14)
+            )
+
+        assert ok is False
+        assert "lookup error" in err.lower()
+
+    def test_load_config_populates_entries(self, app):
+        """_load_config should populate UI entries from saved config."""
+        mock_config = MagicMock(
+            day_folder="/saved/day",
+            night_folder="/saved/night",
+            printer_name="Saved Printer",
+            headers_footers_only=True,
+        )
+        app.config_manager.load.return_value = mock_config
+
+        # Reset entries to mock clean state
+        app.ui.day_entry = MagicMock()
+        app.ui.night_entry = MagicMock()
+        app.ui.printer_var = MagicMock()
+        app.ui.headers_only_var = MagicMock()
+
+        app._load_config()
+
+        app.ui.day_entry.insert.assert_called_with(0, "/saved/day")
+        app.ui.night_entry.insert.assert_called_with(0, "/saved/night")
+        app.ui.printer_var.set.assert_called_with("Saved Printer")
+        app.ui.headers_only_var.set.assert_called_with(True)
+
+    def test_load_config_exception_shows_warning(self, app):
+        """_load_config should show warning on load failure."""
+        app.config_manager.load.side_effect = IOError("Corrupted")
+        app._load_config()
+        app.ui.show_warning.assert_called_once()
+        assert "Corrupted" in app.ui.show_warning.call_args[0][1]
+
+    def test_show_failure_summary_message_format(self, app, tmp_path):
+        """_show_failure_summary should format failures and truncate at MAX_FAILURE_SUMMARY_SHOWN."""
+        failures = [
+            {
+                "date": date(2026, 1, d),
+                "shift": "day",
+                "template": f"Template{d}",
+                "error": f"Error {d}",
+            }
+            for d in range(14, 22)  # 8 failures
+        ]
+
+        with patch("src.main.get_data_dir", return_value=tmp_path):
+            app._show_failure_summary(failures)
+
+        app.ui.show_warning.assert_called_once()
+        msg = app.ui.show_warning.call_args[0][1]
+        assert "8 operation(s) failed" in msg
+        # Should show first 5 then "... and 3 more"
+        assert "... and 3 more" in msg
+        assert "Error 14" in msg  # first failure visible
+        assert "Failure report saved to" in msg
+
+    @patch.object(main_module, "WordProcessor")
+    @patch.object(main_module, "validate_folder_path", return_value=(True, None))
+    def test_process_batch_exception_resets_ui(self, mock_validate, mock_wp_class, app):
+        """_process_batch should reset UI to normal state even when an exception occurs."""
+        mock_wp = MagicMock()
+        mock_wp.__enter__ = MagicMock(return_value=mock_wp)
+        mock_wp.__exit__ = MagicMock(return_value=False)
+        # Blow up during print
+        mock_wp.print_document.side_effect = RuntimeError("COM catastrophe")
+        mock_wp_class.return_value = mock_wp
+
+        params = {
+            "start_date": date(2026, 1, 14),
+            "end_date": date(2026, 1, 14),
+            "day_folder": "/tmp/day",
+            "night_folder": "/tmp/night",
+            "printer_name": "Test Printer",
+        }
+
         app._process_batch(params)
 
-        # Verify failure summary was scheduled to show
-        app.root.after.assert_called()
+        # The finally block schedules reset_ui via _safe_after.
+        # Execute all scheduled callbacks.
+        for call in app.root.after.call_args_list:
+            cb = call[0][1] if len(call[0]) > 1 else None
+            if cb is not None:
+                try:
+                    cb()
+                except Exception:
+                    pass
 
-    def test_on_close_without_active_thread(self, app):
-        """Should destroy window immediately if no thread is running."""
-        app._processing_thread = None
-        app._on_close()
-        app.root.destroy.assert_called_once()
+        # show_error should have been called for the exception
+        app.ui.show_error.assert_called()
+        # Inputs should be re-enabled
+        app.ui.set_inputs_enabled.assert_called_with(True)
+        # Print button should be re-enabled
+        app.ui.set_print_button_state.assert_called_with("normal")
 
-    def test_on_close_with_active_thread(self, app):
-        """Should cancel and join thread before destroying window."""
-        mock_thread = MagicMock()
-        mock_thread.is_alive.return_value = True
-        app._processing_thread = mock_thread
+    @patch.object(main_module, "WordProcessor")
+    @patch.object(main_module, "validate_folder_path", return_value=(True, None))
+    def test_process_batch_propagates_headers_footers_only(
+        self, mock_validate, mock_wp_class, app
+    ):
+        """_process_batch should forward headers_footers_only to print_document."""
+        mock_wp = MagicMock()
+        mock_wp.print_document.return_value = (True, None)
+        mock_wp.__enter__ = MagicMock(return_value=mock_wp)
+        mock_wp.__exit__ = MagicMock(return_value=False)
+        mock_wp_class.return_value = mock_wp
 
-        app._on_close()
+        params = {
+            "start_date": date(2026, 1, 14),
+            "end_date": date(2026, 1, 14),
+            "day_folder": "/tmp/day",
+            "night_folder": "/tmp/night",
+            "printer_name": "Test Printer",
+            "headers_footers_only": True,
+        }
 
-        assert app._cancel_event.is_set()
-        mock_thread.join.assert_called_once_with(timeout=5)
-        app.root.destroy.assert_called_once()
+        app._process_batch(params)
+
+        # Both calls (day + night) should pass headers_footers_only=True
+        assert mock_wp.print_document.call_count == 2
+        for call in mock_wp.print_document.call_args_list:
+            assert call.kwargs.get("headers_footers_only") is True
+
+    def test_write_failure_report_exception_returns_none(self, app, tmp_path):
+        """_write_failure_report should return None when writing fails."""
+        failures = [
+            {
+                "date": date(2026, 1, 14),
+                "shift": "day",
+                "template": "Wednesday",
+                "error": "Broke",
+            }
+        ]
+
+        with patch("src.main.get_data_dir", side_effect=OSError("Permission denied")):
+            result = app._write_failure_report(failures)
+
+        assert result is None
+
+
+class TestComputeBatchSize:
+    """Tests for _compute_batch_size function."""
+
+    def test_single_day(self):
+        """Single day should return 1 day and 2 jobs."""
+        total_days, total_jobs = _compute_batch_size(
+            date(2026, 1, 14), date(2026, 1, 14)
+        )
+        assert total_days == 1
+        assert total_jobs == 2
+
+    def test_week_range(self):
+        """A week should return 7 days and 14 jobs."""
+        total_days, total_jobs = _compute_batch_size(
+            date(2026, 1, 14), date(2026, 1, 20)
+        )
+        assert total_days == 7
+        assert total_jobs == 14
+
+    def test_month_range(self):
+        """A 30-day range should return 30 days and 60 jobs."""
+        total_days, total_jobs = _compute_batch_size(
+            date(2026, 1, 1), date(2026, 1, 30)
+        )
+        assert total_days == 30
+        assert total_jobs == 60

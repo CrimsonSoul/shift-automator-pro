@@ -5,13 +5,13 @@ This module handles all interactions with Microsoft Word via COM automation,
 including document opening, date replacement, and printing.
 """
 
-import os
+import gc
 import time
 import re
 from datetime import date
 from pathlib import Path
-from typing import Optional, Any, Callable
-from typing import cast
+from types import TracebackType
+from typing import Iterator, Optional, Any, Callable, cast
 
 try:
     import pythoncom as _pythoncom  # type: ignore
@@ -35,6 +35,8 @@ from .constants import (
     WD_EVEN_PAGES_FOOTER_STORY,
     WD_FIRST_PAGE_HEADER_STORY,
     WD_FIRST_PAGE_FOOTER_STORY,
+    WD_FIND_CONTINUE,
+    WD_REPLACE_ALL,
 )
 from .logger import get_logger
 from .path_validation import validate_folder_path, is_path_within_base
@@ -48,6 +50,10 @@ def get_word_automation_status() -> tuple[bool, str]:
 
     This does not guarantee Microsoft Word is installed, but it ensures the
     pywin32 COM bindings are importable.
+
+    Returns:
+        Tuple of ``(available, message)``.  When *available* is ``False``,
+        *message* describes what is missing.
     """
 
     if _pythoncom is None or _win32_client is None:
@@ -66,8 +72,12 @@ class TemplateLookupError(Exception):
 class WordProcessor:
     """Handles Word document operations via COM automation."""
 
-    def __init__(self):
-        """Initialize WordProcessor."""
+    def __init__(self) -> None:
+        """Initialize WordProcessor.
+
+        The Word COM connection is *not* opened here; call :meth:`initialize`
+        (or use the context manager) to start the Word process.
+        """
         self.word_app: Any = None
         self._initialized = False
         self._com_initialized = False
@@ -139,8 +149,11 @@ class WordProcessor:
             except Exception as e:
                 logger.warning(f"Error shutting down Word: {e}")
             finally:
+                # Force-release the COM reference to prevent zombie Word.exe
+                # processes when other references (e.g. exception tracebacks) linger.
                 self.word_app = None
                 self._initialized = False
+                gc.collect()
 
         if self._com_initialized:
             try:
@@ -168,24 +181,40 @@ class WordProcessor:
     def _build_template_cache(self, folder_path: str) -> dict[str, str]:
         """Build a normalized template cache for a folder.
 
-        Filters out Word lock files (~$*) and hidden files (.*).
+        Scans *folder_path* for ``.docx`` files, filtering out Word lock
+        files (``~$*``) and hidden files (``.*``).
+
+        Args:
+            folder_path: Absolute path to the template folder.
+
+        Returns:
+            Dict mapping normalized (lower-cased, whitespace-collapsed) base
+            names to their full file paths.
         """
 
-        files = os.listdir(folder_path)
         cache: dict[str, str] = {}
-        for f in files:
+        for entry in Path(folder_path).iterdir():
+            name = entry.name
             # Skip Word temp lock files and hidden files
-            if f.startswith("~$") or f.startswith("."):
+            if name.startswith("~$") or name.startswith("."):
                 continue
-            if f.lower().endswith(DOCX_EXTENSION):
-                base_name = " ".join(f.lower().replace(DOCX_EXTENSION, "").split())
-                cache[base_name] = os.path.join(folder_path, f)
+            if name.lower().endswith(DOCX_EXTENSION):
+                base_name = " ".join(name.lower().replace(DOCX_EXTENSION, "").split())
+                cache[base_name] = str(entry)
         return cache
 
     def _ensure_template_cache(
         self, folder_path: str, force_refresh: bool = False
     ) -> None:
-        """Ensure the template cache exists; optionally rebuild it."""
+        """Ensure the template cache exists; optionally rebuild it.
+
+        Args:
+            folder_path: Absolute path to the template folder.
+            force_refresh: If True, rebuild even if a cache already exists.
+
+        Raises:
+            TemplateLookupError: If the folder cannot be listed.
+        """
 
         if (not force_refresh) and folder_path in self._template_cache:
             return
@@ -229,7 +258,8 @@ class WordProcessor:
                 return func(*args)
             except Exception as e:
                 error_str = str(e).lower()
-                if "rejected" in error_str or "call was rejected" in error_str:
+                transient_keywords = ("rejected", "call was rejected", "busy", "server")
+                if any(kw in error_str for kw in transient_keywords):
                     if attempt < retries - 1:
                         logger.debug(
                             f"COM call rejected, retrying ({attempt + 1}/{retries})"
@@ -249,11 +279,15 @@ class WordProcessor:
         Uses caching for faster lookup and robust matching logic.
 
         Args:
-            folder: The folder to search in
-            template_name: The name of the template (without extension)
+            folder: The folder to search in.
+            template_name: The name of the template (without extension).
 
         Returns:
-            Full path to the template file, or None if not found
+            Full path to the template file, or ``None`` if not found.
+
+        Raises:
+            TemplateLookupError: If the folder is invalid or multiple
+                templates match ambiguously.
         """
         # Validate folder path
         is_valid, error_msg = validate_folder_path(folder)
@@ -269,23 +303,16 @@ class WordProcessor:
 
         for attempt in range(2):
             cache = self._template_cache[folder_path]
-            logger.debug(
-                f"Looking for template '{template_name}' (normalized: '{template_name_lower}') "
-                f"in cache with {len(cache)} entries"
-            )
 
             # 1. Try exact match
             if template_name_lower in cache:
                 target = cache[template_name_lower]
-                logger.debug(f"Found exact template match: {target}")
+                logger.debug(f"Template exact match: '{template_name}' -> {target}")
                 return target
 
             # 2. Try robust matching using word boundaries
             # This prevents "Thursday" matching "THIRD Thursday"
             # but allows "Thursday" matching "Thursday Night" if it's the only match
-            logger.debug(
-                f"No exact match for '{template_name_lower}', trying robust matching"
-            )
             pattern = re.compile(rf"\b{re.escape(template_name_lower)}\b")
 
             matches: list[str] = []
@@ -448,6 +475,8 @@ class WordProcessor:
         Args:
             doc: The Word document object
             current_date: The date to use for replacements
+            headers_footers_only: If True, restrict replacements to
+                header/footer story ranges only.
         """
         allowed_story_types: Optional[set[int]] = None
         if headers_footers_only:
@@ -512,11 +541,15 @@ class WordProcessor:
     def _normalize_spaces_in_doc(
         self, doc: Any, allowed_story_types: Optional[set[int]] = None
     ) -> None:
-        """
-        Replace non-breaking spaces with regular spaces in the document.
+        """Replace non-breaking spaces with regular spaces in the document.
 
         Word templates frequently contain non-breaking spaces (Unicode 00A0)
         which prevent wildcard find/replace patterns from matching date strings.
+
+        Args:
+            doc: The Word document object.
+            allowed_story_types: Optional set of Word StoryType constants to
+                restrict the scope of replacement.
         """
         try:
             for story in self._iter_story_ranges(
@@ -533,10 +566,10 @@ class WordProcessor:
                     False,  # MatchSoundsLike
                     False,  # MatchAllWordForms
                     True,  # Forward
-                    1,  # Wrap (wdFindContinue)
+                    WD_FIND_CONTINUE,  # Wrap
                     False,  # Format
                     " ",  # ReplaceWith: regular space
-                    2,  # Replace (wdReplaceAll)
+                    WD_REPLACE_ALL,  # Replace
                 )
         except Exception as e:
             logger.debug(f"Non-breaking space normalization: {e}")
@@ -555,6 +588,8 @@ class WordProcessor:
             doc: The Word document object
             find_text: The text pattern to find
             replace_text: The replacement text
+            allowed_story_types: Optional set of Word StoryType constants to
+                restrict which story ranges are searched.
 
         Returns:
             True if at least one replacement was made
@@ -572,8 +607,17 @@ class WordProcessor:
 
     def _iter_story_ranges(
         self, doc: Any, allowed_story_types: Optional[set[int]] = None
-    ):
-        """Iterate all story ranges, optionally filtering by StoryType."""
+    ) -> Iterator[Any]:
+        """Iterate all story ranges, optionally filtering by StoryType.
+
+        Args:
+            doc: The Word document object.
+            allowed_story_types: If provided, only yield ranges whose
+                ``StoryType`` is in this set.
+
+        Yields:
+            Word Range objects from the document's StoryRanges collection.
+        """
 
         try:
             for story in doc.StoryRanges:
@@ -616,10 +660,10 @@ class WordProcessor:
                 False,  # MatchSoundsLike
                 False,  # MatchAllWordForms
                 True,  # Forward
-                1,  # Wrap (wdFindContinue)
+                WD_FIND_CONTINUE,  # Wrap
                 False,  # Format
                 replace_text,  # ReplaceWith
-                2,  # Replace (wdReplaceAll)
+                WD_REPLACE_ALL,  # Replace
             )
             if result:
                 logger.debug(f"Find/replace matched: '{find_text}' -> '{replace_text}'")
@@ -628,11 +672,38 @@ class WordProcessor:
             logger.warning(f"Error in find/replace operation: {e}")
             return False
 
-    def __enter__(self):
-        """Context manager entry."""
+    def __del__(self) -> None:
+        """Safety net: ensure COM resources are released if not explicitly shut down."""
+        if self._initialized or self.word_app is not None:
+            try:
+                self.shutdown()
+            except Exception as e:
+                # Destructor — logging may itself be torn down; best-effort.
+                try:
+                    logger.debug(f"Error in __del__ cleanup: {e}")
+                except Exception:
+                    pass
+
+    def __enter__(self) -> "WordProcessor":
+        """Context manager entry: initialize Word and return self.
+
+        Returns:
+            The initialized ``WordProcessor`` instance.
+        """
         self.initialize()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Context manager exit: shut down the Word application.
+
+        Args:
+            exc_type: Exception type, if any.
+            exc_val: Exception value, if any.
+            exc_tb: Exception traceback, if any.
+        """
         self.shutdown()

@@ -10,6 +10,7 @@ import subprocess
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 from datetime import date
+from pathlib import Path
 
 try:
     from tkcalendar import DateEntry  # type: ignore
@@ -28,16 +29,102 @@ from .constants import (
     FONTS,
     WINDOW_WIDTH,
     WINDOW_HEIGHT,
+    WINDOW_MIN_HEIGHT,
     WINDOW_RESIZABLE,
     PROGRESS_MAX,
     PRINTER_ENUM_LOCAL,
     PRINTER_ENUM_NETWORK,
     DEFAULT_PRINTER_LABEL,
+    AUTO_RESIZE_MIN_WIDTH,
+    AUTO_RESIZE_MIN_HEIGHT,
 )
 from .logger import get_logger
 from .app_paths import get_data_dir
 
 logger = get_logger(__name__)
+
+# Imported lazily to avoid circular dependency; only used for version display.
+_APP_VERSION: Optional[str] = None
+
+
+def _get_version() -> str:
+    """Return the package version string.
+
+    Returns:
+        Version string (e.g. ``"2.0.0"``), or ``""`` if unavailable.
+    """
+    global _APP_VERSION
+    if _APP_VERSION is None:
+        try:
+            from . import __version__
+
+            _APP_VERSION = __version__
+        except Exception as e:
+            logger.debug(f"Could not determine app version: {e}")
+            _APP_VERSION = ""
+    return _APP_VERSION
+
+
+class _ToolTip:
+    """Lightweight hover tooltip for any Tkinter widget."""
+
+    def __init__(self, widget: Any, text: str, delay: int = 400) -> None:
+        """Create a tooltip that appears on hover.
+
+        Args:
+            widget: The Tkinter widget to attach the tooltip to.
+            text: Tooltip text to display.
+            delay: Delay in milliseconds before showing the tooltip.
+        """
+        self._widget = widget
+        self._text = text
+        self._delay = delay
+        self._tip_window: Optional[tk.Toplevel] = None
+        self._after_id: Optional[str] = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event: Any = None) -> None:
+        self._cancel()
+        self._after_id = self._widget.after(self._delay, self._show)
+
+    def _show(self) -> None:
+        if self._tip_window:
+            return
+        try:
+            x = self._widget.winfo_rootx() + 20
+            y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        except Exception as e:
+            logger.debug(f"Tooltip geometry lookup failed: {e}")
+            return
+        tw = tk.Toplevel(self._widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            tw,
+            text=self._text,
+            background=COLORS.surface,
+            foreground=COLORS.text_main,
+            relief="solid",
+            borderwidth=1,
+            font=FONTS.sub,
+            padx=6,
+            pady=4,
+        )
+        label.pack()
+        self._tip_window = tw
+
+    def _hide(self, _event: Any = None) -> None:
+        self._cancel()
+        if self._tip_window:
+            self._tip_window.destroy()
+            self._tip_window = None
+
+    def _cancel(self) -> None:
+        if self._after_id:
+            self._widget.after_cancel(self._after_id)
+            self._after_id = None
 
 
 class ScheduleAppUI:
@@ -51,16 +138,19 @@ class ScheduleAppUI:
             root: The Tkinter root window
         """
         self.root = root
-        self.root.title("Shift Automator")
+        self.root.title("Shift Automator Pro")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.resizable(WINDOW_RESIZABLE, WINDOW_RESIZABLE)
         self.root.configure(bg=COLORS.background)
 
+        # Apply window icon if available.
+        self._apply_icon()
+
         # Provide a sane minimum size; DPI scaling can otherwise clip content.
         try:
-            self.root.minsize(WINDOW_WIDTH, 720)
-        except Exception:
-            pass
+            self.root.minsize(WINDOW_WIDTH, WINDOW_MIN_HEIGHT)
+        except Exception as e:
+            logger.debug(f"Could not set minimum window size: {e}")
 
         # Configure styles
         self.style = ttk.Style()
@@ -74,6 +164,7 @@ class ScheduleAppUI:
         self.end_date_picker: Optional[Any] = None
         self.printer_var: Optional[tk.StringVar] = None
         self.headers_only_var: Optional[tk.BooleanVar] = None
+        self._hf_check: Optional[ttk.Checkbutton] = None
         self.status_label: Optional[ttk.Label] = None
         self.progress_var: Optional[tk.DoubleVar] = None
         self.progress: Optional[ttk.Progressbar] = None
@@ -88,6 +179,9 @@ class ScheduleAppUI:
 
         # If DPI scaling / fonts push content beyond default height, expand once.
         self._auto_resize_to_content()
+
+        # Center the window on screen after final sizing.
+        self._center_window()
 
         logger.info("UI initialized")
 
@@ -121,7 +215,14 @@ class ScheduleAppUI:
             fieldbackground=COLORS.surface,
             foreground=COLORS.text_main,
             insertcolor=COLORS.text_main,
+            selectbackground=COLORS.accent,
+            selectforeground=COLORS.text_main,
             borderwidth=0,
+        )
+        self.style.map(
+            "TEntry",
+            fieldbackground=[("disabled", COLORS.border)],
+            foreground=[("disabled", COLORS.text_dim)],
         )
 
         # Buttons (Unified SaaS Look)
@@ -133,7 +234,15 @@ class ScheduleAppUI:
             font=FONTS.bold,
             padding=(12, 6),
         )
-        self.style.map("TButton", background=[("active", COLORS.secondary)])
+        self.style.map(
+            "TButton",
+            background=[
+                ("disabled", COLORS.border),
+                ("pressed", COLORS.background),
+                ("active", COLORS.secondary),
+            ],
+            foreground=[("disabled", COLORS.text_dim)],
+        )
 
         # Progress
         self.style.configure(
@@ -157,6 +266,20 @@ class ScheduleAppUI:
             background=COLORS.background,
         )
 
+        # Status labels (success / error variants)
+        self.style.configure(
+            "Success.TLabel",
+            font=FONTS.sub,
+            foreground=COLORS.success,
+            background=COLORS.background,
+        )
+        self.style.configure(
+            "Error.TLabel",
+            font=FONTS.sub,
+            foreground=COLORS.error,
+            background=COLORS.background,
+        )
+
         # Checkbuttons
         self.style.configure(
             "TCheckbutton",
@@ -164,6 +287,62 @@ class ScheduleAppUI:
             foreground=COLORS.text_main,
             font=FONTS.sub,
         )
+        self.style.map(
+            "TCheckbutton",
+            background=[("active", COLORS.background)],
+            foreground=[("disabled", COLORS.text_dim)],
+        )
+
+        # OptionMenu (printer dropdown)
+        self.style.configure(
+            "TMenubutton",
+            background=COLORS.surface,
+            foreground=COLORS.text_main,
+            borderwidth=0,
+            font=FONTS.main,
+            padding=(10, 6),
+        )
+        self.style.map(
+            "TMenubutton",
+            background=[
+                ("disabled", COLORS.border),
+                ("active", COLORS.secondary),
+            ],
+            foreground=[("disabled", COLORS.text_dim)],
+        )
+
+    def _apply_icon(self) -> None:
+        """Set the window icon from the bundled icon file, if present."""
+        try:
+            # PyInstaller bundles set sys._MEIPASS; otherwise use the repo root.
+            base = getattr(sys, "_MEIPASS", None)
+            if base is None:
+                base = str(Path(__file__).resolve().parent.parent)
+            ico_path = Path(base) / "icon.ico"
+            png_path = Path(base) / "icon.png"
+            if ico_path.exists():
+                self.root.iconbitmap(str(ico_path))
+            elif png_path.exists():
+                img = tk.PhotoImage(file=str(png_path))
+                self.root.iconphoto(True, img)
+                # Keep a reference so the image isn't garbage-collected.
+                self._icon_image = img
+        except Exception as e:
+            logger.debug(f"Could not set window icon: {e}")
+
+    def _center_window(self) -> None:
+        """Center the window on the primary monitor."""
+        try:
+            self.root.update_idletasks()
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            scr_w = self.root.winfo_screenwidth()
+            scr_h = self.root.winfo_screenheight()
+            x = max(0, (scr_w - w) // 2)
+            y = max(0, (scr_h - h) // 2)
+            self.root.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception as e:
+            logger.debug(f"Could not center window: {e}")
 
     def _enumerate_printers(self) -> list[str]:
         """Return a sorted list of available printer names."""
@@ -234,9 +413,21 @@ class ScheduleAppUI:
         """Create the header section."""
         header_row = ttk.Frame(parent)
         header_row.pack(fill="x", pady=(0, 40))
-        ttk.Label(header_row, text="Shift Automator", style="Header.TLabel").pack(
-            anchor="w"
+
+        # Title row: app name + version badge
+        title_row = ttk.Frame(header_row)
+        title_row.pack(fill="x")
+        ttk.Label(title_row, text="Shift Automator Pro", style="Header.TLabel").pack(
+            side="left"
         )
+        version = _get_version()
+        if version:
+            ttk.Label(
+                title_row,
+                text=f"v{version}",
+                style="Sub.TLabel",
+            ).pack(side="left", padx=(12, 0), anchor="s", pady=(0, 6))
+
         ttk.Label(
             header_row,
             text="High-performance batch scheduling & printing",
@@ -281,7 +472,7 @@ class ScheduleAppUI:
             "headersbackground": COLORS.background,
             "headersforeground": COLORS.text_dim,
             "selectbackground": COLORS.accent,
-            "selectforeground": "#FFFFFF",
+            "selectforeground": COLORS.text_main,
             "normalbackground": COLORS.surface,
             "normalforeground": COLORS.text_main,
             "weekendbackground": COLORS.surface,
@@ -311,8 +502,8 @@ class ScheduleAppUI:
 
         try:
             start_picker.bind("<<DateEntrySelected>>", self._on_start_date_selected)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not bind DateEntrySelected event: {e}")
 
         # End Date
         end_wrap = ttk.Frame(range_row)
@@ -329,7 +520,7 @@ class ScheduleAppUI:
         self.end_date_picker = end_picker
 
     def _on_start_date_selected(self, event: Optional[object] = None) -> None:
-        """Default end date to start date when needed."""
+        """Sync end date to match start date if end is currently before start."""
 
         start_picker = self.start_date_picker
         end_picker = self.end_date_picker
@@ -342,8 +533,9 @@ class ScheduleAppUI:
             end_dt = cast(Any, end_picker).get_date()
             if end_dt < start_dt:
                 cast(Any, end_picker).set_date(start_dt)
-        except Exception:
+        except Exception as e:
             # DateEntry implementations vary; never block the UI on this helper.
+            logger.debug(f"Error syncing date pickers: {e}")
             return
 
     def _create_date_entry(
@@ -354,7 +546,16 @@ class ScheduleAppUI:
     ) -> Any:
         """Create a themed tkcalendar DateEntry.
 
-        tkcalendar versions differ in supported keyword args; fall back gracefully.
+        tkcalendar versions differ in supported keyword args; fall back
+        gracefully through progressively simpler constructor calls.
+
+        Args:
+            date_entry_cls: The ``DateEntry`` class from tkcalendar.
+            parent: Parent widget to contain the date entry.
+            calendar_kw: Dict of calendar styling keyword arguments.
+
+        Returns:
+            A ``DateEntry`` widget instance.
         """
 
         # Prefer using ttk styling for the entry itself.
@@ -365,8 +566,8 @@ class ScheduleAppUI:
                 date_pattern="mm/dd/yyyy",
                 calendar_kw=calendar_kw,
             )
-        except TypeError:
-            pass
+        except TypeError as e:
+            logger.debug(f"DateEntry calendar_kw not supported, falling back: {e}")
 
         # Older builds may not support calendar_kw; try passing common color keys directly.
         try:
@@ -376,8 +577,9 @@ class ScheduleAppUI:
                 date_pattern="mm/dd/yyyy",
                 **calendar_kw,
             )
-        except TypeError:
-            return date_entry_cls(parent)
+        except TypeError as e:
+            logger.debug(f"DateEntry inline calendar kwargs not supported: {e}")
+            return date_entry_cls(parent, style="TEntry", date_pattern="mm/dd/yyyy")
 
     def _auto_resize_to_content(self) -> None:
         """Expand the window once if content would be clipped."""
@@ -391,17 +593,18 @@ class ScheduleAppUI:
             scr_w = self.root.winfo_screenwidth()
             scr_h = self.root.winfo_screenheight()
 
-            target_w = min(max(cur_w, req_w), max(320, scr_w - 80))
-            target_h = min(max(cur_h, req_h), max(400, scr_h - 80))
+            target_w = min(max(cur_w, req_w), max(AUTO_RESIZE_MIN_WIDTH, scr_w - 80))
+            target_h = min(max(cur_h, req_h), max(AUTO_RESIZE_MIN_HEIGHT, scr_h - 80))
             if target_w != cur_w or target_h != cur_h:
                 self.root.geometry(f"{target_w}x{target_h}")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Auto-resize skipped: {e}")
             return
 
     def _create_printer_row(self, parent: Union[ttk.Frame, ttk.LabelFrame]) -> None:
         """Create the printer selection row."""
         output_row = ttk.Frame(parent)
-        output_row.pack(fill="x")
+        output_row.pack(fill="x", pady=(0, 0))
         ttk.Label(output_row, text="TARGET PRINTER", style="Sub.TLabel").pack(
             anchor="w", pady=(0, 8)
         )
@@ -422,9 +625,29 @@ class ScheduleAppUI:
         )
         self.printer_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        ttk.Button(
-            printer_row, text="Refresh", width=10, command=self.refresh_printers
-        ).pack(side="right")
+        # Style the dropdown popup menu to match the dark theme.
+        try:
+            menu = self.printer_dropdown["menu"]
+            menu.configure(
+                bg=COLORS.surface,
+                fg=COLORS.text_main,
+                activebackground=COLORS.accent,
+                activeforeground=COLORS.text_main,
+                borderwidth=1,
+                relief="flat",
+            )
+        except Exception as e:
+            logger.debug(f"Could not style printer dropdown menu: {e}")
+
+        refresh_btn = ttk.Button(
+            printer_row,
+            text="Refresh",
+            width=10,
+            command=self.refresh_printers,
+            cursor="hand2",
+        )
+        refresh_btn.pack(side="right")
+        _ToolTip(refresh_btn, "Re-scan for available printers")
 
         if not all_printers:
             msg = "No printers found. Check connections."
@@ -444,11 +667,17 @@ class ScheduleAppUI:
         )
 
         self.headers_only_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        self._hf_check = ttk.Checkbutton(
             options_row,
             text="Replace dates in headers/footers only (safer)",
             variable=self.headers_only_var,
-        ).pack(anchor="w")
+        )
+        self._hf_check.pack(anchor="w")
+        _ToolTip(
+            self._hf_check,
+            "Only update dates in document headers and footers,\n"
+            "leaving the body text unchanged.",
+        )
         ttk.Label(
             options_row,
             text="When enabled, date patterns inside the document body are left unchanged.",
@@ -470,9 +699,15 @@ class ScheduleAppUI:
         )
         self.status_label.pack(side="left")
 
-        ttk.Button(
-            status_wrap, text="Open Logs", width=10, command=self.open_logs_folder
-        ).pack(side="right")
+        open_logs_btn = ttk.Button(
+            status_wrap,
+            text="Open Logs",
+            width=10,
+            command=self.open_logs_folder,
+            cursor="hand2",
+        )
+        open_logs_btn.pack(side="right")
+        _ToolTip(open_logs_btn, "Open configuration, log, and report folder")
 
         # Progress Bar
         self.progress_var = tk.DoubleVar()
@@ -489,12 +724,15 @@ class ScheduleAppUI:
             footer,
             text="START EXECUTION",
             bg=COLORS.accent,
-            fg="#FFFFFF",
+            fg=COLORS.text_main,
             font=FONTS.button,
             relief="flat",
             pady=18,
             cursor="hand2",
             activebackground=COLORS.accent_hover,
+            activeforeground=COLORS.text_main,
+            disabledforeground=COLORS.text_dim,
+            disabledbackground=COLORS.surface,  # type: ignore[call-arg]
         )
         self.print_btn.pack(fill="x")
 
@@ -524,7 +762,11 @@ class ScheduleAppUI:
         entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
         ttk.Button(
-            row, text="Browse", width=10, command=lambda: self._browse_folder(entry)
+            row,
+            text="Browse",
+            width=10,
+            command=lambda: self._browse_folder(entry),
+            cursor="hand2",
         ).pack(side="right")
 
         return entry
@@ -536,7 +778,9 @@ class ScheduleAppUI:
         Args:
             entry: Entry widget to update with selected path
         """
-        path = filedialog.askdirectory()
+        current = entry.get().strip()
+        initial = current if current and os.path.isdir(current) else None
+        path = filedialog.askdirectory(initialdir=initial)
         if path:
             entry.delete(0, tk.END)
             entry.insert(0, path)
@@ -582,17 +826,56 @@ class ScheduleAppUI:
             logger.warning("Could not parse end date from picker")
             return None
 
-    def set_start_command(self, command: Callable[[], None]) -> None:
-        """
-        Set the command for the print button and bind Enter key.
+    def set_start_command(
+        self,
+        command: Callable[[], None],
+        cancel_command: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Set the command for the print button and keyboard shortcuts.
+
+        Binds ``Enter`` to *command* (start) and ``Escape`` to
+        *cancel_command* (stop) if provided.
 
         Args:
-            command: Function to call when button is clicked
+            command: Function to call when button is clicked or Enter is pressed.
+            cancel_command: Optional function to call when Escape is pressed.
         """
         if self.print_btn:
             self.print_btn.config(command=command)
         # Allow Enter key to trigger execution from anywhere in the window.
         self.root.bind("<Return>", lambda _event: command())
+        if cancel_command is not None:
+            self.root.bind("<Escape>", lambda _event: cancel_command())
+
+    def set_inputs_enabled(self, enabled: bool) -> None:
+        """Enable or disable all input widgets during processing.
+
+        Args:
+            enabled: True to enable inputs, False to disable.
+        """
+        state: Literal["normal", "disabled"] = "normal" if enabled else "disabled"
+        for widget in (self.day_entry, self.night_entry):
+            if widget is not None:
+                try:
+                    widget.config(state=state)
+                except Exception as e:
+                    logger.debug(f"Could not set entry state: {e}")
+        for picker in (self.start_date_picker, self.end_date_picker):
+            if picker is not None:
+                try:
+                    picker.config(state=state)
+                except Exception as e:
+                    logger.debug(f"Could not set date picker state: {e}")
+        if self.printer_dropdown is not None:
+            try:
+                self.printer_dropdown.config(state=state)
+            except Exception as e:
+                logger.debug(f"Could not set printer dropdown state: {e}")
+        if self._hf_check is not None:
+            try:
+                self._hf_check.config(state=state)
+            except Exception as e:
+                logger.debug(f"Could not set checkbutton state: {e}")
 
     def set_print_button_state(self, state: Literal["normal", "disabled"]) -> None:
         """
@@ -608,32 +891,66 @@ class ScheduleAppUI:
         """
         Update the status label and progress bar.
 
+        The label style is automatically set based on the message content:
+        green for completion, red for cancellation/error, dim for idle.
+
         Args:
             message: Status message to display
             progress: Progress value (0-100)
         """
         if self.status_label:
-            self.status_label.config(text=message)
+            # Pick contextual style based on message.
+            msg_lower = message.lower()
+            if "complete" in msg_lower:
+                style = "Success.TLabel"
+            elif "cancel" in msg_lower or "error" in msg_lower or "fail" in msg_lower:
+                style = "Error.TLabel"
+            else:
+                style = "Sub.TLabel"
+            self.status_label.config(text=message, style=style)
         if self.progress_var:
             self.progress_var.set(progress)
 
     def show_error(self, title: str, message: str) -> None:
-        """Show an error message box."""
+        """Show an error message box.
+
+        Args:
+            title: Dialog window title.
+            message: Message body to display.
+        """
         logger.error(f"{title}: {message}")
         messagebox.showerror(title, message)
 
     def show_warning(self, title: str, message: str) -> None:
-        """Show a warning message box."""
+        """Show a warning message box.
+
+        Args:
+            title: Dialog window title.
+            message: Message body to display.
+        """
         logger.warning(f"{title}: {message}")
         messagebox.showwarning(title, message)
 
     def show_info(self, title: str, message: str) -> None:
-        """Show an info message box."""
+        """Show an info message box.
+
+        Args:
+            title: Dialog window title.
+            message: Message body to display.
+        """
         logger.info(f"{title}: {message}")
         messagebox.showinfo(title, message)
 
     def ask_yes_no(self, title: str, message: str) -> bool:
-        """Ask the user a yes/no question."""
+        """Ask the user a yes/no question.
+
+        Args:
+            title: Dialog window title.
+            message: Question to display.
+
+        Returns:
+            ``True`` if the user clicked Yes, ``False`` otherwise.
+        """
         return bool(messagebox.askyesno(title, message))
 
     def open_logs_folder(self) -> None:
@@ -642,8 +959,8 @@ class ScheduleAppUI:
         path = get_data_dir()
         try:
             path.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not create logs directory: {e}")
 
         try:
             if hasattr(os, "startfile"):
@@ -659,6 +976,10 @@ class ScheduleAppUI:
                 subprocess.run(["xdg-open", str(path)], check=False)
         except Exception as e:
             logger.error(f"Could not open logs folder: {e}")
+            messagebox.showinfo(
+                "Logs Folder",
+                f"Could not open folder automatically.\n\nPath:\n{path}",
+            )
 
     def run(self) -> None:
         """Start the main UI loop."""

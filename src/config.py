@@ -8,7 +8,7 @@ import json
 import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Optional
 
 from .constants import CONFIG_FILENAME
 from .app_paths import get_data_dir
@@ -28,32 +28,32 @@ class AppConfig:
     printer_name: str = ""
     headers_footers_only: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary."""
+    def to_dict(self) -> dict[str, Any]:
+        """Convert config to dictionary.
+
+        Returns:
+            Dict with keys ``day_folder``, ``night_folder``,
+            ``printer_name``, and ``headers_footers_only``.
+        """
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
-        """Create config from dictionary."""
+    def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
+        """Create config from dictionary.
+
+        Args:
+            data: Dictionary with config keys. Missing keys use defaults.
+                Unknown keys are silently ignored.
+
+        Returns:
+            A new ``AppConfig`` instance.
+        """
         return cls(
             day_folder=data.get("day_folder", ""),
             night_folder=data.get("night_folder", ""),
             printer_name=data.get("printer_name", ""),
             headers_footers_only=bool(data.get("headers_footers_only", False)),
         )
-
-    def validate(self) -> tuple[bool, Optional[str]]:
-        """
-        Validate configuration values.
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
-        if self.day_folder and not os.path.isdir(self.day_folder):
-            return False, f"Day folder does not exist: {self.day_folder}"
-        if self.night_folder and not os.path.isdir(self.night_folder):
-            return False, f"Night folder does not exist: {self.night_folder}"
-        return True, None
 
 
 class ConfigManager:
@@ -64,7 +64,8 @@ class ConfigManager:
         Initialize ConfigManager.
 
         Args:
-            config_path: Path to config file (default: CONFIG_FILENAME in current directory)
+            config_path: Path to config file (default: per-user data
+                directory / CONFIG_FILENAME, i.e. ``%APPDATA%`` on Windows)
         """
         self._legacy_config_path = Path(CONFIG_FILENAME)
         self._allow_legacy_migration = config_path is None
@@ -79,11 +80,13 @@ class ConfigManager:
         Load configuration from file.
 
         Returns:
-            AppConfig instance with loaded values or defaults
+            AppConfig instance with loaded values, or defaults if the
+            config file does not exist.
 
         Raises:
-            json.JSONDecodeError: If config file contains invalid JSON
-            IOError: If config file cannot be read
+            json.JSONDecodeError: If the primary config file exists but
+                contains invalid JSON.
+            IOError: If the primary config file exists but cannot be read.
         """
         if not self.config_path.exists():
             # Backward-compatibility: older versions stored config.json in the working directory.
@@ -142,7 +145,7 @@ class ConfigManager:
             config: AppConfig instance to save (uses current config if None)
 
         Raises:
-            IOError: If config file cannot be written
+            IOError/OSError: If the config file cannot be written.
         """
         config_to_save = config or self._config
         if config_to_save is None:
@@ -168,7 +171,11 @@ class ConfigManager:
 
     @property
     def config(self) -> AppConfig:
-        """Get current configuration."""
+        """Get current configuration, loading from disk on first access.
+
+        Returns:
+            The current ``AppConfig`` instance.
+        """
         if self._config is None:
             self._config = self.load()
         return self._config

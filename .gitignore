@@ -35,8 +35,11 @@ env/
 
 # Application specific
 config.json
+config.json.migrated
+*.migrated
 shift_automator.log
 *.log
+failure_report*.csv
 
 # PyInstaller
 *.spec

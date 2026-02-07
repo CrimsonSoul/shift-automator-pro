@@ -16,8 +16,14 @@ APP_DIRNAME = "Shift Automator Pro"
 def get_data_dir() -> Path:
     """Return the per-user data directory for the app.
 
+    The directory is *not* created by this function; callers are responsible
+    for calling ``mkdir()`` if needed.
+
     Windows: %APPDATA%\\Shift Automator Pro (fallback to %LOCALAPPDATA%)
     Other OSes (dev/test): ~/.shift-automator-pro
+
+    Returns:
+        Path to the per-user data directory.
     """
 
     if os.name == "nt":

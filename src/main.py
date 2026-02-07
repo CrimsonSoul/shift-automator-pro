@@ -7,17 +7,24 @@ A high-performance desktop application for automating shift schedule printing.
 import threading
 import csv
 from datetime import date, datetime
-from datetime import timedelta
-from typing import Optional, Callable
+from typing import Any, Optional, Callable, TypedDict
 
 import tkinter as tk
 
 from .config import ConfigManager, AppConfig
-from .constants import PROGRESS_MAX, COLORS, DEFAULT_PRINTER_LABEL, LOG_FILENAME
+from .constants import (
+    PROGRESS_MAX,
+    COLORS,
+    DEFAULT_PRINTER_LABEL,
+    LOG_FILENAME,
+    LARGE_BATCH_THRESHOLD,
+    MAX_PREFLIGHT_MISSING_SHOWN,
+    MAX_FAILURE_SUMMARY_SHOWN,
+)
 
 from .logger import setup_logging, get_logger
 from .path_validation import validate_folder_path
-from .scheduler import get_shift_template_name, validate_date_range
+from .scheduler import get_shift_template_name, validate_date_range, get_date_range
 from .ui import ScheduleAppUI
 from .word_processor import (
     WordProcessor,
@@ -29,8 +36,45 @@ from .app_paths import get_data_dir
 logger = get_logger(__name__)
 
 
+class FailedOperation(TypedDict):
+    """Typed structure for tracking failed print operations.
+
+    Attributes:
+        date: The date that was being processed.
+        shift: Shift type (``"day"`` or ``"night"``).
+        template: Template name that was looked up.
+        error: Human-readable error message, or ``None``.
+    """
+
+    date: date
+    shift: str
+    template: str
+    error: Optional[str]
+
+
+def _compute_batch_size(start_date: date, end_date: date) -> tuple[int, int]:
+    """Compute total days and total jobs for a date range.
+
+    Args:
+        start_date: Inclusive start date.
+        end_date: Inclusive end date.
+
+    Returns:
+        Tuple of (total_days, total_jobs) where total_jobs = total_days * 2
+        (one day shift + one night shift per day).
+    """
+    total_days = (end_date - start_date).days + 1
+    total_jobs = total_days * 2
+    return total_days, total_jobs
+
+
 class ShiftAutomatorApp:
-    """Main application controller."""
+    """Main application controller.
+
+    Coordinates configuration management, input validation, preflight
+    template checks, and background batch processing of shift schedule
+    documents.
+    """
 
     def __init__(self, root: tk.Tk):
         """
@@ -43,6 +87,7 @@ class ShiftAutomatorApp:
         self.ui = ScheduleAppUI(root)
         self.config_manager = ConfigManager()
         self.word_processor: Optional[WordProcessor] = None
+        self._preflight_wp: Optional[WordProcessor] = None
         self._processing_thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
         self._closing = False
@@ -50,8 +95,10 @@ class ShiftAutomatorApp:
         # Load and apply saved configuration
         self._load_config()
 
-        # Set up button command
-        self.ui.set_start_command(self.start_processing)
+        # Set up button command and keyboard shortcuts (Enter = start, Escape = cancel)
+        self.ui.set_start_command(
+            self.start_processing, cancel_command=self._cancel_if_running
+        )
 
         # Handle window close gracefully
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -61,9 +108,13 @@ class ShiftAutomatorApp:
     def _safe_after(self, callback: Callable[[], None]) -> None:
         """Schedule a UI callback if the window is still alive.
 
-        Tkinter isn't thread-safe; all UI updates must be scheduled onto the UI thread.
-        During shutdown, the root window can be destroyed while the worker thread is
-        still running; in that case, after() can raise TclError.
+        Tkinter isn't thread-safe; all UI updates must be scheduled onto the
+        UI thread.  During shutdown the root window can be destroyed while the
+        worker thread is still running; ``after()`` raises ``TclError`` in
+        that case, which this method swallows.
+
+        Args:
+            callback: Zero-argument callable to schedule on the UI thread.
         """
 
         if self._closing:
@@ -88,9 +139,7 @@ class ShiftAutomatorApp:
             if config.printer_name and self.ui.printer_var:
                 self.ui.printer_var.set(config.printer_name)
             if self.ui.headers_only_var:
-                self.ui.headers_only_var.set(
-                    bool(getattr(config, "headers_footers_only", False))
-                )
+                self.ui.headers_only_var.set(bool(config.headers_footers_only))
             logger.info("Configuration loaded successfully")
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
@@ -133,10 +182,11 @@ class ShiftAutomatorApp:
             return False, "Please select a target printer"
 
         # Validate printer against enumerated list when available
-        available_printers = []
+        available_printers: list[str] = []
         try:
             available_printers = self.ui.get_available_printers()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Could not enumerate printers for validation: {e}")
             available_printers = []
 
         if available_printers and printer_name not in available_printers:
@@ -187,18 +237,28 @@ class ShiftAutomatorApp:
         On success the WordProcessor instance (with a warm template cache) is
         stored on ``self._preflight_wp`` so that ``_process_batch`` can reuse it
         instead of re-scanning the filesystem.
+
+        Args:
+            day_folder: Path to the day-shift template folder.
+            night_folder: Path to the night-shift template folder.
+            start_date: Inclusive start date of the batch.
+            end_date: Inclusive end date of the batch.
+
+        Returns:
+            Tuple of ``(ok, error_message)``.  On success *error_message*
+            is ``None``.
         """
 
         try:
-            total_days = (end_date - start_date).days + 1
-        except Exception:
+            total_days, _ = _compute_batch_size(start_date, end_date)
+        except Exception as e:
+            logger.debug(f"Could not compute batch size: {e}")
             return False, "Invalid date range"
 
         day_templates: set[str] = set()
         night_templates: set[str] = set()
 
-        for i in range(total_days):
-            dt = start_date + timedelta(days=i)
+        for dt in get_date_range(start_date, end_date):
             day_templates.add(get_shift_template_name(dt, "day"))
             night_templates.add(get_shift_template_name(dt, "night"))
 
@@ -224,10 +284,10 @@ class ShiftAutomatorApp:
             return False, err
 
         if missing:
-            shown = "\n".join(missing[:10])
+            shown = "\n".join(missing[:MAX_PREFLIGHT_MISSING_SHOWN])
             more = ""
-            if len(missing) > 10:
-                more = f"\n...and {len(missing) - 10} more"
+            if len(missing) > MAX_PREFLIGHT_MISSING_SHOWN:
+                more = f"\n...and {len(missing) - MAX_PREFLIGHT_MISSING_SHOWN} more"
             return (
                 False,
                 "Missing required templates:\n\n"
@@ -236,11 +296,15 @@ class ShiftAutomatorApp:
             )
 
         # Stash the WordProcessor so _process_batch can reuse its template cache.
-        self._preflight_wp: Optional[WordProcessor] = wp
+        self._preflight_wp = wp
         return True, None
 
     def start_processing(self) -> None:
-        """Start the batch processing in a background thread."""
+        """Start batch processing in a background thread, or cancel if already running.
+
+        If a batch is already in progress, sets the cancel flag and disables the
+        button instead of starting a new batch.
+        """
         # Check if already processing (can be used as stop button)
         if self._processing_thread and self._processing_thread.is_alive():
             self._cancel_event.set()
@@ -263,9 +327,8 @@ class ShiftAutomatorApp:
         start_date = self.ui.get_start_date()
         end_date = self.ui.get_end_date()
         if start_date and end_date:
-            total_days = (end_date - start_date).days + 1
-            total_docs = total_days * 2
-            if total_days >= 30:
+            total_days, total_docs = _compute_batch_size(start_date, end_date)
+            if total_days >= LARGE_BATCH_THRESHOLD:
                 ok = self.ui.ask_yes_no(
                     "Large Batch Confirm",
                     f"This will print {total_docs} documents ({total_days} days x 2 shifts).\n\nContinue?",
@@ -287,7 +350,8 @@ class ShiftAutomatorApp:
             "headers_footers_only": self.ui.get_headers_footers_only(),
         }
 
-        # Update button text to STOP
+        # Update button text to STOP and disable inputs during processing
+        self.ui.set_inputs_enabled(False)
         if self.ui.print_btn:
             self.ui.print_btn.config(text="STOP EXECUTION", bg=COLORS.error)
 
@@ -296,6 +360,22 @@ class ShiftAutomatorApp:
             target=self._process_batch, args=(batch_params,), daemon=True
         )
         self._processing_thread.start()
+
+    def _cancel_if_running(self) -> None:
+        """Cancel the current batch if one is active (Escape key handler)."""
+        if self._processing_thread and self._processing_thread.is_alive():
+            self._cancel_event.set()
+            current_progress = (
+                self.ui.progress_var.get() if self.ui.progress_var else 0.0
+            )
+            self.ui.update_status(
+                "Stopping after current document...", current_progress
+            )
+            self.ui.set_print_button_state("disabled")
+
+    def _cancel_ui_update(self) -> None:
+        """Schedule a 'Cancelled' status update on the UI thread."""
+        self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
 
     def _print_shift(
         self,
@@ -308,7 +388,7 @@ class ShiftAutomatorApp:
         job_index: int,
         total_jobs: int,
         headers_footers_only: bool,
-        failed_operations: list,
+        failed_operations: list[FailedOperation],
     ) -> None:
         """Print a single shift document and record failures.
 
@@ -322,7 +402,7 @@ class ShiftAutomatorApp:
             job_index: Current 0-based job index (for progress display).
             total_jobs: Total number of jobs in the batch.
             headers_footers_only: Whether to limit date replacement to headers/footers.
-            failed_operations: Mutable list to append failure dicts to.
+            failed_operations: Mutable list to append failure records to.
         """
         day_name = current_date.strftime("%A")
         display_date = current_date.strftime("%m/%d/%Y")
@@ -357,7 +437,7 @@ class ShiftAutomatorApp:
                 f"Failed to print {shift_label.lower()} shift for {current_date}: {error}"
             )
 
-    def _process_batch(self, params: dict) -> None:
+    def _process_batch(self, params: dict[str, Any]) -> None:
         """
         Process the batch of schedules.
 
@@ -387,35 +467,32 @@ class ShiftAutomatorApp:
         self._save_config(config)
 
         # Calculate total days (MAX_DAYS_RANGE already validated by _validate_inputs)
-        total_days = (end_date - start_date).days + 1
-        total_jobs = total_days * 2
+        total_days, total_jobs = _compute_batch_size(start_date, end_date)
 
         logger.info(f"Processing {total_days} days from {start_date} to {end_date}")
 
         # Track failed operations
-        failed_operations: list[dict] = []
+        failed_operations: list[FailedOperation] = []
 
         try:
             # Reuse the WordProcessor from preflight (warm template cache) if available.
-            wp = getattr(self, "_preflight_wp", None) or WordProcessor()
+            wp = self._preflight_wp or WordProcessor()
             self._preflight_wp = None  # release reference
 
             self._safe_after(lambda: self.ui.update_status("Initializing Word...", 0))
 
             with wp as word_proc:
                 job_index = 0
-                for i in range(total_days):
+                for current_date in get_date_range(start_date, end_date):
                     if self._cancel_event.is_set():
                         logger.info("Batch processing cancelled by user")
-                        self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
+                        self._cancel_ui_update()
                         return
-
-                    current_date = start_date + timedelta(days=i)
 
                     # Day Shift
                     day_template = get_shift_template_name(current_date, "day")
                     if self._cancel_event.is_set():
-                        self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
+                        self._cancel_ui_update()
                         return
                     self._print_shift(
                         word_proc,
@@ -434,7 +511,7 @@ class ShiftAutomatorApp:
                     # Night Shift
                     night_template = get_shift_template_name(current_date, "night")
                     if self._cancel_event.is_set():
-                        self._safe_after(lambda: self.ui.update_status("Cancelled", 0))
+                        self._cancel_ui_update()
                         return
                     self._print_shift(
                         word_proc,
@@ -470,16 +547,14 @@ class ShiftAutomatorApp:
 
         except Exception as e:
             logger.exception("Error during batch processing")
-            self._safe_after(
-                lambda: self.ui.show_error(
-                    "Processing Error", f"An error occurred during processing: {str(e)}"
-                )
-            )
+            err_msg = f"An error occurred during processing: {type(e).__name__}: {e}"
+            self._safe_after(lambda: self.ui.show_error("Processing Error", err_msg))
         finally:
             # Re-enable button and reset text
             def reset_ui() -> None:
                 if self._closing:
                     return
+                self.ui.set_inputs_enabled(True)
                 if self.ui.print_btn:
                     self.ui.print_btn.config(text="START EXECUTION", bg=COLORS.accent)
                 self.ui.set_print_button_state("normal")
@@ -495,7 +570,7 @@ class ShiftAutomatorApp:
             self._processing_thread.join(timeout=5)
         self.root.destroy()
 
-    def _show_failure_summary(self, failed_operations: list[dict]) -> None:
+    def _show_failure_summary(self, failed_operations: list[FailedOperation]) -> None:
         """
         Show a summary of failed operations.
 
@@ -506,13 +581,13 @@ class ShiftAutomatorApp:
         report_path = self._write_failure_report(failed_operations)
         message = f"{total} operation(s) failed:\n\n"
 
-        # Show first 5 failures
-        for i, op in enumerate(failed_operations[:5], 1):
+        # Show first N failures
+        for i, op in enumerate(failed_operations[:MAX_FAILURE_SUMMARY_SHOWN], 1):
             date_str = op["date"].strftime("%m/%d/%Y")
             message += f"{i}. {date_str} {op['shift'].title()} Shift ({op['template']}): {op['error']}\n"
 
-        if total > 5:
-            message += f"\n... and {total - 5} more failures"
+        if total > MAX_FAILURE_SUMMARY_SHOWN:
+            message += f"\n... and {total - MAX_FAILURE_SUMMARY_SHOWN} more failures"
 
         data_dir = get_data_dir()
         log_path = data_dir / LOG_FILENAME
@@ -524,8 +599,18 @@ class ShiftAutomatorApp:
 
         self.ui.show_warning("Processing Completed with Errors", message)
 
-    def _write_failure_report(self, failed_operations: list[dict]) -> Optional[str]:
-        """Write a CSV failure report to the data directory."""
+    def _write_failure_report(
+        self, failed_operations: list[FailedOperation]
+    ) -> Optional[str]:
+        """Write a CSV failure report to the data directory.
+
+        Args:
+            failed_operations: List of failed operation records to write.
+
+        Returns:
+            Absolute path to the written CSV file, or ``None`` if writing
+            failed.
+        """
 
         try:
             data_dir = get_data_dir()

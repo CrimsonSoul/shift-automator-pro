@@ -6,7 +6,7 @@ to avoid magic numbers and strings.
 """
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Union
 
 __all__ = [
     "MONDAY",
@@ -42,6 +42,16 @@ __all__ = [
     "WD_EVEN_PAGES_FOOTER_STORY",
     "WD_FIRST_PAGE_HEADER_STORY",
     "WD_FIRST_PAGE_FOOTER_STORY",
+    "WD_FIND_CONTINUE",
+    "WD_REPLACE_ALL",
+    "PROTECTION_ALLOW_FORM_FIELDS",
+    "LARGE_BATCH_THRESHOLD",
+    "MAX_PREFLIGHT_MISSING_SHOWN",
+    "MAX_FAILURE_SUMMARY_SHOWN",
+    "MAX_FILENAME_LENGTH",
+    "WINDOW_MIN_HEIGHT",
+    "AUTO_RESIZE_MIN_WIDTH",
+    "AUTO_RESIZE_MIN_HEIGHT",
     "COLORS",
     "FONTS",
 ]
@@ -93,6 +103,19 @@ PROGRESS_MAX: Final = 100
 # Date validation
 MAX_DAYS_RANGE: Final = 365
 
+# Batch processing thresholds
+LARGE_BATCH_THRESHOLD: Final = 30  # days — prompt user for confirmation
+MAX_PREFLIGHT_MISSING_SHOWN: Final = 10  # missing templates shown before truncation
+MAX_FAILURE_SUMMARY_SHOWN: Final = 5  # failures shown in the summary dialog
+
+# Path safety
+MAX_FILENAME_LENGTH: Final = 255
+
+# UI sizing limits
+WINDOW_MIN_HEIGHT: Final = 720
+AUTO_RESIZE_MIN_WIDTH: Final = 320
+AUTO_RESIZE_MIN_HEIGHT: Final = 400
+
 # Retry settings for COM calls
 COM_RETRIES: Final = 5
 COM_RETRY_DELAY: Final = 1  # seconds
@@ -105,6 +128,12 @@ WD_PRIMARY_FOOTER_STORY: Final = 9
 WD_EVEN_PAGES_FOOTER_STORY: Final = 10
 WD_FIRST_PAGE_HEADER_STORY: Final = 11
 WD_FIRST_PAGE_FOOTER_STORY: Final = 12
+
+# Word Find/Replace constants
+# See: https://learn.microsoft.com/en-us/office/vba/api/word.wdfindwrap
+WD_FIND_CONTINUE: Final = 1  # wdFindContinue
+# See: https://learn.microsoft.com/en-us/office/vba/api/word.wdreplace
+WD_REPLACE_ALL: Final = 2  # wdReplaceAll
 
 
 @dataclass(frozen=True)
@@ -123,15 +152,38 @@ class Colors:
     accent_hover: str = "#3A6DFF"  # Accent hover state
 
 
+FontSpec = Union[tuple[str, int], tuple[str, int, str]]
+
+
+def _font_family() -> str:
+    """Return a platform-appropriate font family name.
+
+    Returns:
+        Font family name string suitable for the current OS.
+    """
+    import sys
+
+    if sys.platform == "darwin":
+        return "SF Pro Text"
+    if sys.platform.startswith("linux"):
+        return "Ubuntu"
+    # Windows — prefer the variable font (Windows 11+); Tkinter silently
+    # falls back to "Segoe UI" (Windows 7+) if the variable font is absent.
+    return "Segoe UI Variable Display"
+
+
+_FONT_FAMILY: Final = _font_family()
+
+
 @dataclass(frozen=True)
 class Fonts:
     """Font configuration for the application UI."""
 
-    main: tuple = ("Segoe UI Variable Display", 10)
-    bold: tuple = ("Segoe UI Variable Display", 10, "bold")
-    header: tuple = ("Segoe UI Variable Display", 24, "bold")
-    sub: tuple = ("Segoe UI Variable Display", 9)
-    button: tuple = ("Segoe UI Variable Display", 11, "bold")
+    main: FontSpec = (_FONT_FAMILY, 10)
+    bold: FontSpec = (_FONT_FAMILY, 10, "bold")
+    header: FontSpec = (_FONT_FAMILY, 24, "bold")
+    sub: FontSpec = (_FONT_FAMILY, 9)
+    button: FontSpec = (_FONT_FAMILY, 11, "bold")
 
 
 # Global color and font instances

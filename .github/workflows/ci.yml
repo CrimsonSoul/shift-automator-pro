@@ -10,7 +10,11 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ['3.12']
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,7 +22,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
@@ -37,6 +41,10 @@ jobs:
       - name: Type check (mypy)
         run: |
           mypy src
+
+      - name: Lint (pylint)
+        run: |
+          pylint src --fail-under=8.0 --disable=C0114,C0115,C0116,R0903
 
       - name: Run tests
         run: |

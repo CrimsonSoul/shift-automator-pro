@@ -1,0 +1,111 @@
+"""
+Unit tests for logger module.
+"""
+
+import logging
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from src.logger import setup_logging, get_logger
+
+
+class TestSetupLogging:
+    """Tests for setup_logging function."""
+
+    def test_returns_root_logger(self, tmp_path):
+        """Should return the root logger."""
+        result = setup_logging(log_dir=str(tmp_path))
+        assert isinstance(result, logging.Logger)
+        assert result.name == "root"
+
+    def test_default_level_is_info(self, tmp_path):
+        """Should default to INFO when DEBUG env is not set."""
+        with patch.dict(os.environ, {}, clear=True):
+            logger = setup_logging(log_dir=str(tmp_path))
+            assert logger.level == logging.INFO
+
+    def test_debug_env_enables_debug_level(self, tmp_path):
+        """Should set DEBUG level when DEBUG=1 env var is set."""
+        with patch.dict(os.environ, {"DEBUG": "1"}, clear=False):
+            logger = setup_logging(log_dir=str(tmp_path))
+            assert logger.level == logging.DEBUG
+
+    def test_debug_env_true_string(self, tmp_path):
+        """Should set DEBUG level when DEBUG=true env var is set."""
+        with patch.dict(os.environ, {"DEBUG": "true"}, clear=False):
+            logger = setup_logging(log_dir=str(tmp_path))
+            assert logger.level == logging.DEBUG
+
+    def test_explicit_log_level(self, tmp_path):
+        """Should use the explicitly provided log_level."""
+        logger = setup_logging(log_level=logging.WARNING, log_dir=str(tmp_path))
+        assert logger.level == logging.WARNING
+
+    def test_creates_log_file(self, tmp_path):
+        """Should create a log file in the specified directory."""
+        setup_logging(log_dir=str(tmp_path))
+        log_files = list(tmp_path.glob("*.log"))
+        assert len(log_files) == 1
+        assert log_files[0].name == "shift_automator.log"
+
+    def test_custom_log_filename(self, tmp_path):
+        """Should use a custom log filename when specified."""
+        setup_logging(log_dir=str(tmp_path), log_filename="custom.log")
+        assert (tmp_path / "custom.log").exists()
+
+    def test_creates_log_directory(self, tmp_path):
+        """Should create the log directory if it doesn't exist."""
+        log_dir = tmp_path / "subdir" / "logs"
+        setup_logging(log_dir=str(log_dir))
+        assert log_dir.exists()
+
+    def test_has_file_and_console_handlers(self, tmp_path):
+        """Should have both a file handler and a console handler."""
+        logger = setup_logging(log_dir=str(tmp_path))
+        handler_types = [type(h) for h in logger.handlers]
+        assert logging.handlers.RotatingFileHandler in handler_types
+        assert logging.StreamHandler in handler_types
+
+    def test_clears_existing_handlers(self, tmp_path):
+        """Should clear existing root handlers to avoid duplicates."""
+        root = logging.getLogger()
+        root.addHandler(logging.StreamHandler())
+        initial_count = len(root.handlers)
+
+        setup_logging(log_dir=str(tmp_path))
+        # After setup, should only have file + console handlers (2 total)
+        assert len(root.handlers) == 2
+
+    def test_graceful_fallback_on_unwritable_dir(self, tmp_path):
+        """Should still add a console handler if file handler fails."""
+        # Use a path that can't be written to
+        with patch(
+            "logging.handlers.RotatingFileHandler",
+            side_effect=IOError("Permission denied"),
+        ):
+            logger = setup_logging(log_dir=str(tmp_path))
+            # Should have at least the console handler
+            assert len(logger.handlers) >= 1
+            assert any(isinstance(h, logging.StreamHandler) for h in logger.handlers)
+
+
+class TestGetLogger:
+    """Tests for get_logger function."""
+
+    def test_returns_named_logger(self):
+        """Should return a logger with the given name."""
+        logger = get_logger("test.module")
+        assert logger.name == "test.module"
+
+    def test_default_name(self):
+        """Should return 'shift_automator' when no name provided."""
+        logger = get_logger()
+        assert logger.name == "shift_automator"
+
+    def test_none_name(self):
+        """Should return 'shift_automator' when name is None."""
+        logger = get_logger(None)
+        assert logger.name == "shift_automator"

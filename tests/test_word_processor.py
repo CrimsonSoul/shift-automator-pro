@@ -252,6 +252,59 @@ class TestWordProcessor:
         assert wp.word_app is None
         assert wp._initialized is False
 
+    def test_print_document_happy_path(self, wp, tmp_path):
+        """print_document should open, replace dates, print, and close."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        # Create a template file so find_template_file resolves it
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        mock_doc.ProtectionType = -1  # PROTECTION_NONE
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        with patch.object(wp, "safe_com_call", side_effect=lambda f, *a, **kw: f(*a)):
+            with patch.object(wp, "replace_dates"):
+                success, error = wp.print_document(
+                    str(tmp_path),
+                    "Wednesday",
+                    date(2026, 1, 14),
+                    "Test Printer",
+                )
+
+        assert success is True
+        assert error is None
+        # Verify document was opened, printed, and closed
+        wp.word_app.Documents.Open.assert_called_once()
+        mock_doc.PrintOut.assert_called_once_with(False)
+        mock_doc.Close.assert_called()
+
+    def test_print_document_not_initialized(self, wp):
+        """print_document should fail if Word is not initialized."""
+        wp._initialized = False
+        wp.word_app = None
+        success, error = wp.print_document("/tmp", "Test", date(2026, 1, 14), "Printer")
+        assert success is False
+        assert "not initialized" in error.lower()
+
+    def test_safe_com_call_rejects_zero_retries(self, wp):
+        """safe_com_call should raise ValueError for retries < 1."""
+        with pytest.raises(ValueError, match="retries must be >= 1"):
+            wp.safe_com_call(lambda: None, retries=0)
+
+    def test_build_template_cache_filters_lock_files(self, wp, tmp_path):
+        """_build_template_cache should skip ~$ lock files and hidden files."""
+        (tmp_path / "Monday.docx").write_text("dummy")
+        (tmp_path / "~$Monday.docx").write_text("lock")
+        (tmp_path / ".hidden.docx").write_text("hidden")
+
+        cache = wp._build_template_cache(str(tmp_path))
+        assert "monday" in cache
+        assert "~$monday" not in cache
+        assert ".hidden" not in cache
+        assert len(cache) == 1
+
     def test_print_document_rejects_path_traversal(self, wp, tmp_path):
         """print_document should reject templates outside the folder."""
         wp._initialized = True
@@ -266,3 +319,106 @@ class TestWordProcessor:
         )
         assert success is False
         assert "outside" in error.lower()
+
+    def test_shutdown_quit_raises(self, wp):
+        """shutdown should handle Quit() raising an exception gracefully."""
+        wp._initialized = True
+        wp._com_initialized = True
+        mock_app = MagicMock()
+        mock_app.Quit.side_effect = Exception("COM server crashed")
+        wp.word_app = mock_app
+
+        # Should not raise
+        wp.shutdown()
+
+        # word_app should be cleared even when Quit fails
+        assert wp.word_app is None
+        assert wp._initialized is False
+        assert wp._com_initialized is False
+
+    def test_shutdown_couninitialize_raises(self, wp):
+        """shutdown should handle CoUninitialize() raising an exception."""
+        wp._initialized = True
+        wp._com_initialized = True
+        wp.word_app = MagicMock()
+
+        with patch("src.word_processor.pythoncom.CoUninitialize") as mock_uninit:
+            mock_uninit.side_effect = Exception("Thread mismatch")
+            wp.shutdown()
+
+        assert wp.word_app is None
+        assert wp._initialized is False
+        # _com_initialized should still be reset in the finally block
+        assert wp._com_initialized is False
+
+    def test_print_document_protected_document(self, wp, tmp_path):
+        """print_document should unprotect a protected document before printing."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        mock_doc.ProtectionType = 3  # PROTECTION_READ_ONLY
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        with patch.object(wp, "safe_com_call", side_effect=lambda f, *a, **kw: f(*a)):
+            with patch.object(wp, "replace_dates"):
+                success, error = wp.print_document(
+                    str(tmp_path), "Wednesday", date(2026, 1, 14), "Printer"
+                )
+
+        assert success is True
+        mock_doc.Unprotect.assert_called_once()
+
+    def test_print_document_active_printer_failure(self, wp, tmp_path):
+        """print_document should continue even if ActivePrinter assignment fails."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        mock_doc.ProtectionType = -1  # PROTECTION_NONE
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        # Make ActivePrinter assignment raise
+        type(wp.word_app).ActivePrinter = property(
+            fget=lambda s: "default",
+            fset=MagicMock(side_effect=Exception("Printer not found")),
+        )
+
+        with patch.object(wp, "safe_com_call", side_effect=lambda f, *a, **kw: f(*a)):
+            with patch.object(wp, "replace_dates"):
+                success, error = wp.print_document(
+                    str(tmp_path), "Wednesday", date(2026, 1, 14), "Bad Printer"
+                )
+
+        # Should still succeed (ActivePrinter failure is non-fatal)
+        assert success is True
+        mock_doc.PrintOut.assert_called_once_with(False)
+
+    def test_print_document_closes_on_printout_error(self, wp, tmp_path):
+        """print_document finally block should close doc if PrintOut raises."""
+        wp._initialized = True
+        wp.word_app = MagicMock()
+
+        (tmp_path / "Wednesday.docx").write_text("dummy")
+
+        mock_doc = MagicMock()
+        mock_doc.ProtectionType = -1  # PROTECTION_NONE
+        mock_doc.PrintOut.side_effect = Exception("Printer offline")
+        wp.word_app.Documents.Open.return_value = mock_doc
+
+        with patch.object(wp, "safe_com_call", side_effect=lambda f, *a, **kw: f(*a)):
+            with patch.object(wp, "replace_dates"):
+                success, error = wp.print_document(
+                    str(tmp_path), "Wednesday", date(2026, 1, 14), "Printer"
+                )
+
+        assert success is False
+        assert "Printer offline" in error
+        # The finally block should attempt to close the document
+        # doc.Close is called in the finally via safe_com_call
+        close_calls = [c for c in mock_doc.Close.call_args_list]
+        assert len(close_calls) >= 1

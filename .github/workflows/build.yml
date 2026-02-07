@@ -10,7 +10,7 @@ on:
       release:
         description: 'Create a GitHub release'
         required: true
-        default: false
+        default: 'false'
         type: boolean
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --name="Shift Automator Pro" main.py
+          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "icon.png;." --name="Shift Automator Pro" main.py
 
 
       - name: Create release directory
@@ -73,7 +73,7 @@ jobs:
             - Preflight template validation and failure CSV reports
             - Comprehensive error handling, logging, and input validation
             - Full type hints, docstrings, and per-user AppData configuration
-            - 105+ unit tests with cross-platform CI
+            - Comprehensive unit test suite with cross-platform CI
             
             ### Installation
 

@@ -68,17 +68,12 @@ def get_shift_template_name(dt: date, shift_type: str = "day") -> str:
 
     if shift_type == "day":
         # Day shift uses "THIRD Thursday" for third Thursdays
-        if is_third_thursday(dt):
-            template_name = "THIRD Thursday"
-            logger.debug(f"Day shift for {dt}: {template_name}")
-        else:
-            template_name = day_name
-            logger.debug(f"Day shift for {dt}: {template_name}")
+        template_name = "THIRD Thursday" if is_third_thursday(dt) else day_name
     else:
         # Night shift always uses "DayName Night"
         template_name = f"{day_name} Night"
-        logger.debug(f"Night shift for {dt}: {template_name}")
 
+    logger.debug(f"{shift_type.title()} shift for {dt}: {template_name}")
     return template_name
 
 
