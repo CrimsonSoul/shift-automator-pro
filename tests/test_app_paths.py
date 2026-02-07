@@ -46,11 +46,17 @@ class TestGetDataDir:
 
     def test_non_windows(self):
         """Should use ~/.shift-automator-pro on non-Windows."""
+
+        class _MockPath(PurePosixPath):
+            @classmethod
+            def home(cls):
+                return cls("/home/testuser")
+
         with patch("src.app_paths.os.name", "posix"), patch(
-            "src.app_paths.Path.home", return_value=Path("/home/testuser")
+            "src.app_paths.Path", _MockPath
         ):
             result = get_data_dir()
-            assert result == Path("/home/testuser") / ".shift-automator-pro"
+            assert str(result) == "/home/testuser/.shift-automator-pro"
 
     def test_returns_path_object(self):
         """Should always return a Path-like object."""
