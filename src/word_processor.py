@@ -512,7 +512,15 @@ class WordProcessor:
         new_year = str(current_date.year)
 
         # Patterns to replace (using Word wildcard syntax).
-        # [A-Za-z]@ means "one or more letters", [0-9]{1,2} means 1-2 digits.
+        # [A-Za-z]{3,20} means "3 to 20 letters", [0-9]{1,2} means 1-2 digits.
+        #
+        # CRITICAL: Word wildcards require BOTH bounds in {n,m} syntax.
+        # The open-ended {n,} form does NOT exist in Word wildcards (unlike
+        # standard regex).  Using {3,} causes undefined behavior — Word may
+        # misparse the trailing comma as part of the quantifier, especially
+        # in the comma-style pattern where {3,} is immediately followed by
+        # a literal comma ({3,},).  This was the root cause of the
+        # Wednesday day-shift date not being replaced.
         #
         # IMPORTANT — overlap prevention strategy:
         # Each pattern is run independently (all patterns are attempted).
@@ -521,25 +529,25 @@ class WordProcessor:
         # specific to least specific.  The "with comma" pattern is run
         # FIRST; because it replaces the full "Day, Month DD, YYYY" string
         # atomically, subsequent patterns cannot partially re-match it.
-        # The night-shift "no comma" pattern uses [A-Za-z]{3,} (3+ letters)
-        # for each word to reduce false positives on non-date text.
-        # The fallback (month-only) pattern requires [A-Za-z]{3,} (3+ letters,
-        # since the shortest English month "May" is 3 chars) to avoid
+        # The night-shift "no comma" pattern uses [A-Za-z]{3,20} (3-20
+        # letters) for each word to reduce false positives on non-date text.
+        # The fallback (month-only) pattern requires [A-Za-z]{3,20}
+        # (since the shortest English month "May" is 3 chars) to avoid
         # matching non-date text like "A 1, 2026" or "V 2, 2025".
         patterns = [
             # Day Shift Style (With Comma): "Sunday, January 04, 2026"
             (
-                "[A-Za-z]{3,}, [A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,20}, [A-Za-z]{3,20} [0-9]{1,2}, [0-9]{4}",
                 f"{new_day}, {new_month} {new_day_num}, {new_year}",
             ),
             # Night Shift Style (No Comma): "Saturday January 03, 2026"
             (
-                "[A-Za-z]{3,} [A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,20} [A-Za-z]{3,20} [0-9]{1,2}, [0-9]{4}",
                 f"{new_day} {new_month} {new_day_num}, {new_year}",
             ),
             # Fallback/Standard Style: "January 04, 2026"
             (
-                "[A-Za-z]{3,} [0-9]{1,2}, [0-9]{4}",
+                "[A-Za-z]{3,20} [0-9]{1,2}, [0-9]{4}",
                 f"{new_month} {new_day_num}, {new_year}",
             ),
         ]
