@@ -92,12 +92,12 @@ class TestWordProcessor:
         ) as mock_exec:
             wp.replace_dates(mock_doc, current_date)
 
-            # Should be called 3 times (one per pattern: comma, no-comma, fallback).
+            # Should be called 6 times: 3 ordinal-suffix patterns + 3 plain patterns.
             # All patterns run independently; overlap is prevented by
-            # tighter wildcard constraints ([A-Za-z]{3,}) rather than early-exit.
-            assert mock_exec.call_count == 3
+            # ordering (most-specific first) and tighter wildcard constraints.
+            assert mock_exec.call_count == 6
 
-            # Verify the first call used the "with comma" pattern
+            # Verify the replacement texts include the "with comma" pattern
             # Replacement: "Thursday, January 15, 2026"
             calls = [c[0][2] for c in mock_exec.call_args_list]
             assert "Thursday, January 15, 2026" in calls
@@ -118,7 +118,7 @@ class TestWordProcessor:
         assert "allowed_story_types" in mock_norm.call_args.kwargs
         assert mock_norm.call_args.kwargs["allowed_story_types"] is not None
 
-        assert mock_exec.call_count == 3
+        assert mock_exec.call_count == 6
         assert "allowed_story_types" in mock_exec.call_args.kwargs
         assert mock_exec.call_args.kwargs["allowed_story_types"] is not None
 

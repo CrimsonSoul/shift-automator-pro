@@ -512,29 +512,39 @@ class WordProcessor:
         new_year = str(current_date.year)
 
         # Patterns to replace (using Word wildcard syntax).
-        # [A-Za-z]{3,20} means "3 to 20 letters", [0-9]{1,2} means 1-2 digits.
+        # [A-Za-z]{3,20} means "3 to 20 letters", [0-9]{1,2} means 1-2 digits,
+        # [a-z]{2} matches the ordinal suffix (st, nd, rd, th).
         #
         # CRITICAL: Word wildcards require BOTH bounds in {n,m} syntax.
         # The open-ended {n,} form does NOT exist in Word wildcards (unlike
-        # standard regex).  Using {3,} causes undefined behavior — Word may
-        # misparse the trailing comma as part of the quantifier, especially
-        # in the comma-style pattern where {3,} is immediately followed by
-        # a literal comma ({3,},).  This was the root cause of the
-        # Wednesday day-shift date not being replaced.
+        # standard regex).
         #
         # IMPORTANT — overlap prevention strategy:
         # Each pattern is run independently (all patterns are attempted).
-        # To prevent a broader pattern re-matching text that was already
-        # replaced by a more specific one, patterns are ordered from most
-        # specific to least specific.  The "with comma" pattern is run
-        # FIRST; because it replaces the full "Day, Month DD, YYYY" string
-        # atomically, subsequent patterns cannot partially re-match it.
-        # The night-shift "no comma" pattern uses [A-Za-z]{3,20} (3-20
-        # letters) for each word to reduce false positives on non-date text.
-        # The fallback (month-only) pattern requires [A-Za-z]{3,20}
-        # (since the shortest English month "May" is 3 chars) to avoid
-        # matching non-date text like "A 1, 2026" or "V 2, 2025".
+        # Patterns are ordered most-specific first.  Ordinal-suffix
+        # variants (e.g. "December 17th, 2025") come before plain
+        # variants (e.g. "December 17, 2025") so the suffix is consumed
+        # atomically and the plain pattern cannot partially re-match.
+        # Within each group the "with comma" pattern runs before the
+        # "no comma" pattern which runs before the month-only fallback.
         patterns = [
+            # --- Ordinal-suffix variants (e.g. "17th") first, most specific ---
+            # Day Shift Style with ordinal: "Wednesday, December 17th, 2025"
+            (
+                "[A-Za-z]{3,20}, [A-Za-z]{3,20} [0-9]{1,2}[a-z]{2}, [0-9]{4}",
+                f"{new_day}, {new_month} {new_day_num}, {new_year}",
+            ),
+            # Night Shift Style with ordinal: "Saturday January 3rd, 2026"
+            (
+                "[A-Za-z]{3,20} [A-Za-z]{3,20} [0-9]{1,2}[a-z]{2}, [0-9]{4}",
+                f"{new_day} {new_month} {new_day_num}, {new_year}",
+            ),
+            # Fallback with ordinal: "January 17th, 2025"
+            (
+                "[A-Za-z]{3,20} [0-9]{1,2}[a-z]{2}, [0-9]{4}",
+                f"{new_month} {new_day_num}, {new_year}",
+            ),
+            # --- Standard variants (no ordinal suffix) ---
             # Day Shift Style (With Comma): "Sunday, January 04, 2026"
             (
                 "[A-Za-z]{3,20}, [A-Za-z]{3,20} [0-9]{1,2}, [0-9]{4}",
