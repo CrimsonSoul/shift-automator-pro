@@ -12,6 +12,10 @@ Shift Automator Pro is a Windows desktop app that automates weekly schedule-temp
 - Modular architecture with strong unit-test coverage and static quality gates
 - Packaged as a single-file executable for non-technical end users via PyInstaller
 
+## Preview
+
+![Main window](docs/screenshots/main.png)
+
 ## Core Features
 
 - Batch print processing for date ranges across day/night template folders
