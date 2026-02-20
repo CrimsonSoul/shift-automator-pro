@@ -1,38 +1,34 @@
 # Shift Automator Pro
 
-Shift Automator Pro is a Windows desktop app that automates weekly schedule-template printing through Microsoft Word COM.
+Shift Automator Pro is a Windows desktop app that automates weekly schedule-template printing through Microsoft Word COM automation.
 
 ![Platform](https://img.shields.io/badge/platform-Windows-0a7ea4) ![Language](https://img.shields.io/badge/language-Python%203.12-2ea043) ![UI](https://img.shields.io/badge/ui-Tkinter%2Fttk-4b5563) ![Automation](https://img.shields.io/badge/automation-Word%20COM-1f6feb)
 
 ## Snapshot
 
 - Production-focused Word automation: open, replace, print, and close with cleanup safeguards
-- Domain logic includes monthly clinical rotation handling ("Third Thursday")
-- Defensive workflow with preflight checks, retry paths, and CSV failure reporting
+- Domain logic handles complex monthly rotation scheduling (e.g. "third Thursday" patterns)
+- Defensive workflow with preflight checks, per-document retry paths, and CSV failure reporting
 - Modular architecture with strong unit-test coverage and static quality gates
-- Single-file executable packaging for non-technical end users
-
-## Preview
-
-![Shift Automator Pro icon](icon.png)
+- Packaged as a single-file executable for non-technical end users via PyInstaller
 
 ## Core Features
 
 - Batch print processing for date ranges across day/night template folders
 - Date replacement automation with optional header/footer-only mode
-- Template, path, printer, and date-range preflight validation
-- Per-document retry handling for transient COM errors
-- Structured logs and timestamped CSV failure reports
+- Template path, printer, and date-range preflight validation before any processing begins
+- Per-document retry handling for transient COM errors with structured failure logging
 - Cancelable background processing with responsive UI progress updates
+- Timestamped CSV failure reports for audit and retry workflows
 
 ## Architecture
 
-- `src/main.py`: orchestration and workflow control
-- `src/ui.py`: Tkinter interface layer
-- `src/word_processor.py`: Word COM automation lifecycle
-- `src/scheduler.py`: date and template resolution logic
-- `src/config.py`: config management and migration
-- `src/path_validation.py`: path traversal and filename safety checks
+- `src/main.py` — orchestration and workflow control
+- `src/ui.py` — Tkinter/ttk interface layer
+- `src/word_processor.py` — Word COM automation lifecycle (open, replace, print, close)
+- `src/scheduler.py` — date resolution and template path logic
+- `src/config.py` — config management with migration support
+- `src/path_validation.py` — path traversal and filename safety checks
 
 ## Tech Stack
 
@@ -57,36 +53,36 @@ python main.py
 
 Windows helper scripts:
 
-- `setup.bat` installs dependencies
-- `start_app.bat` launches the app
+- `setup.bat` — installs all dependencies into a virtualenv
+- `start_app.bat` — activates the environment and launches the app
 
 ## Quality and Testing
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
-black --check src tests
-mypy src
-pylint src --fail-under=8.0
+pytest                           # run test suite with coverage
+black --check src tests          # formatting check
+mypy src                         # type checking
+pylint src --fail-under=8.0      # linting gate
 ```
 
-The test suite mocks Windows-only modules so CI can run on non-Windows hosts.
+The test suite mocks all Windows-only modules so it can run on any platform in CI.
 
-## Security and Reliability
+## Security
 
-- Word documents open read-only during processing
-- Word macros are force-disabled during automation
-- Path validation blocks traversal outside configured template roots
+- Word documents open in read-only mode during processing; originals are never modified
+- Word macros are force-disabled on every document open
+- Path validation blocks traversal outside configured template root directories
 - Date range limits prevent runaway batch operations
-- Config writes are atomic and logs capture operational detail
+- Config writes are atomic; all operations are logged with structured timestamps
 
 ## Project Layout
 
-- `main.py`: top-level entry point
-- `src/`: application modules (controller, UI, scheduler, COM processor, config, validation)
-- `tests/`: unit tests and module fixtures
-- `.github/workflows/build.yml`: Windows build/release workflow
+- `main.py` — top-level entry point
+- `src/` — application modules (controller, UI, scheduler, COM processor, config, validation)
+- `tests/` — unit tests and module fixtures
+- `.github/workflows/build.yml` — Windows build and release workflow via PyInstaller
 
 ## License
 
-MIT (see `LICENSE`).
+MIT (see `LICENSE`)
